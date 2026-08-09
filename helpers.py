@@ -1,43 +1,6 @@
 # helpers.py
-import tkinter as tk
 from datetime import datetime
 import pandas as pd
-import ttkbootstrap as tb
-
-# ==================== 智慧型滑鼠懸停 Tooltip 組件 ====================
-class CanvasTooltip:
-    def __init__(self, widget):
-        self.widget = widget
-        self.tipwindow = None
-        self.id = None
-        self.x = self.y = 0
-
-    def showtip(self, text, event=None):
-        if self.tipwindow or not text:
-            return
-        x = self.widget.winfo_rootx() + 20
-        y = self.widget.winfo_rooty() + 20
-        if event:
-            x = event.x_root + 15
-            y = event.y_root + 10
-        self.tipwindow = tw = tk.Toplevel(self.widget)
-        tw.wm_overrideredirect(1)
-        tw.wm_geometry(f"+{x}+{y}")
-        
-        label = tb.Label(
-            tw, text=text, justify=tk.LEFT,
-            background="#333333", foreground="white",
-            relief=tk.SOLID, borderwidth=1,
-            font=("Microsoft JhengHei", 9, "bold"),
-            padding=(10, 6)
-        )
-        label.pack(ipadx=1)
-
-    def hidetip(self):
-        tw = self.tipwindow
-        self.tipwindow = None
-        if tw:
-            tw.destroy()
 
 # ==================== 智慧欄位與日期解析工具 ====================
 def discover_keys(row):
@@ -186,51 +149,3 @@ def format_rev_growth(rev_item):
         return f"{yoy_str} / {mom_str}"
     except (ValueError, TypeError):
         return "N/A"
-
-# ==================== 手動滑鼠拖曳調整欄位順序處理器 (修正版) ====================
-class ColumnDragHandler:
-    def __init__(self, tree):
-        self.tree = tree
-        self.drag_col_id = None
-        
-        # 綁定滑鼠左鍵壓下與放開事件
-        self.tree.bind("<ButtonPress-1>", self.on_press, add="+")
-        self.tree.bind("<ButtonRelease-1>", self.on_release, add="+")
-        
-    def on_press(self, event):
-        # 壓下時必須點擊在 "heading"（表頭）區域
-        region = self.tree.identify_region(event.x, event.y)
-        if region == "heading":
-            col_num_str = self.tree.identify_column(event.x)  # e.g., "#1", "#2"
-            if col_num_str:
-                self.drag_col_id = self.tree.column(col_num_str, "id")
-        else:
-            self.drag_col_id = None
-            
-    def on_release(self, event):
-        if not self.drag_col_id:
-            return
-            
-        # 修正點：放開滑鼠時「不再限制」必須在 heading 區域。
-        # 即使使用者的滑鼠在拖曳過程中向下漂移到 cell（資料列）區域，依然能精確定位其水平欄位！
-        col_num_str = self.tree.identify_column(event.x)
-        if col_num_str:
-            target_col_id = self.tree.column(col_num_str, "id")
-            if target_col_id and target_col_id != self.drag_col_id:
-                # 解決 Tcl 物件/字串解析問題：使用原生 splitlist 解析 displaycolumns 
-                dcols_raw = self.tree.cget("displaycolumns")
-                dcols = list(self.tree.tk.splitlist(dcols_raw))
-                
-                if not dcols or dcols == ["#all"]:
-                    dcols = list(self.tree["columns"])
-                    
-                if self.drag_col_id in dcols and target_col_id in dcols:
-                    idx_from = dcols.index(self.drag_col_id)
-                    dcols.pop(idx_from)
-                    idx_to = dcols.index(target_col_id)
-                    dcols.insert(idx_to, self.drag_col_id)
-                    
-                    # 動態重整顯示順序
-                    self.tree.configure(displaycolumns=dcols)
-                    
-        self.drag_col_id = None
