@@ -115,6 +115,30 @@ def get_eps_from_stmt(stmt):
             return stmt.loc[idx]
     return None
 
+# ==================== 側邊欄網站人氣統計看板 ====================
+st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>📊 網站數據統計</h3>", unsafe_allow_html=True)
+
+# 雲端永久人氣計數器 (綁定 grace120429 的 GitHub 專案，確保全球唯一且永不消失)
+visitor_badge_url = "https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Fgrace120429%2Fmy-stock-web&count_bg=%23007bff&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=Total%20Views&edge_flat=false"
+
+st.sidebar.markdown(
+    f"""
+    <div style='text-align: center; margin-bottom: 20px;'>
+        <img src='{visitor_badge_url}' alt='Views'/>
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
+
+st.sidebar.markdown(
+    """
+    <div style='text-align: center; color: gray; font-size: 12px;'>
+        💡 提示：本計數器由雲端數據庫提供永久累計，每一次頁面載入皆會即時更新。
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 # ==================== 頁首資訊 ====================
 st.title("🖥️ 台股三大法人選股工具 by Kelly (網頁版)")
 
@@ -295,11 +319,21 @@ with tab1:
                             if not rev_item or rev_item.get("yoy", 0) <= 0 or rev_item.get("mom", 0) <= 0:
                                 continue
                         
-                        # 建立快取之外的暫存變數
-                        latest_q_eps_val = "N/A"
-                        latest_a_eps_val = "N/A"
+                        # 智慧型人性化提示初始化
+                        is_code_etf = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
+                        
+                        if is_code_etf:
+                            latest_q_eps_val = "ETF無EPS"
+                            latest_a_eps_val = "ETF無EPS"
+                        else:
+                            latest_q_eps_val = "未啟用過濾"
+                            latest_a_eps_val = "未啟用過濾"
                         
                         try:
+                            # 智慧優化：如果勾選了 EPS 暴增，但當下個股是 ETF，直接淘汰跳過（省去下載財報時間）
+                            if filter_eps_surge and is_code_etf:
+                                continue
+                            
                             time.sleep(0.15)  # 禮貌防阻擋安全等待
                             
                             # 無條件在此先一步建立 stock 對象 (解決在快取讀取時變數 undefined 崩潰)
@@ -317,8 +351,8 @@ with tab1:
                                 errors_log.append(f"{code}: 歷史數據不足")
                                 continue
                                 
-                            # 👈 新增「EPS 暴增」獨立面財務比對與欄位數值提取
-                            if filter_eps_surge:
+                            # 新增「EPS 暴增」獨立面財務比對與欄位數值提取
+                            if filter_eps_surge and not is_code_etf:
                                 try:
                                     q_stmt = stock.quarterly_income_stmt
                                     a_stmt = stock.income_stmt
@@ -396,8 +430,8 @@ with tab1:
                                 "股票名稱": name,
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
-                                "最新單季EPS": latest_q_eps_val,  # 👈 新增：單季EPS數據顯示
-                                "最新年度EPS": latest_a_eps_val,  # 👈 新增：年度EPS數據顯示
+                                "最新單季EPS": latest_q_eps_val,  # 新增：單季EPS數據顯示
+                                "最新年度EPS": latest_a_eps_val,  # 新增：年度EPS數據顯示
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
@@ -502,6 +536,12 @@ with tab2:
                 for code in watchlist:
                     ticker = f"{code}.TW"
                     name = data_fetcher.fetch_stock_name_fast(code)
+                    
+                    # 智慧型人性化提示初始化 (分頁二同步支援)
+                    is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
+                    latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
+                    latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
+                    
                     try:
                         time.sleep(0.15)  # 安全等待
                         
@@ -516,6 +556,33 @@ with tab2:
                             errors_log_tab2.append(f"{code}: 歷史K線數據不足")
                             continue
                             
+                        # 👈 核心新增：分頁二（自選監控）自動載入最新年度與單季 EPS 數據
+                        if not is_code_etf_tab2:
+                            try:
+                                try:
+                                    q_stmt = stock.quarterly_income_stmt
+                                    a_stmt = stock.income_stmt
+                                except:
+                                    q_stmt = stock.quarterly_financials
+                                    a_stmt = stock.financials
+                                q_eps_series = get_eps_from_stmt(q_stmt)
+                                a_eps_series = get_eps_from_stmt(a_stmt)
+                                if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
+                                    latest_q_eps = q_eps_series.iloc[0]
+                                    latest_a_eps = a_eps_series.iloc[0]
+                                    if pd.notna(latest_q_eps) and pd.notna(latest_a_eps):
+                                        latest_q_eps_val_tab2 = f"{round(latest_q_eps, 2)} 元"
+                                        latest_a_eps_val_tab2 = f"{round(latest_a_eps, 2)} 元"
+                                    else:
+                                        latest_q_eps_val_tab2 = "N/A"
+                                        latest_a_eps_val_tab2 = "N/A"
+                                else:
+                                    latest_q_eps_val_tab2 = "N/A"
+                                    latest_a_eps_val_tab2 = "N/A"
+                            except:
+                                latest_q_eps_val_tab2 = "N/A"
+                                latest_a_eps_val_tab2 = "N/A"
+                                
                         price = hist['Close'].iloc[-1]
                         prev_price = hist['Close'].iloc[-2]
                         pct_change = ((price - prev_price) / prev_price) * 100
@@ -559,6 +626,8 @@ with tab2:
                             "股票名稱": name,
                             "現價": round(price, 1),
                             "漲跌幅(%)": round(pct_change, 2),
+                            "最新單季EPS": latest_q_eps_val_tab2,  # 👈 新增自選股單季EPS欄位
+                            "最新年度EPS": latest_a_eps_val_tab2,  # 👈 新增自選股年度EPS欄位
                             "日K_MACD": macd_daily_status,
                             "60分K_MACD": macd_60m_status,
                             "趨勢狀態": alert_str_display,
@@ -669,15 +738,21 @@ with tab4:
                         st.success(f"已新增：{new_etf_code} {etf_name}")
                         time.sleep(0.5)
                         st.rerun()
+                    else:
+                        st.info(f"ℹ️ ETF {new_etf_code} 已經在您的清單中囉！")
                         
             del_etf_code = st.text_input("輸入要移除的 ETF 代碼：", max_chars=6, key="del_etf_code")
             if st.button("❌ 刪除選中 ETF", type="secondary"):
-                del_etf_code = del_etf_code.upper().strip()
-                hot_etfs = [item for item in hot_etfs if item[0] != del_etf_code]
-                storage.save_custom_etfs(hot_etfs)
-                st.success(f"已成功刪除：{del_etf_code}")
-                time.sleep(0.5)
-                st.rerun()
+                if del_etf_code:
+                    del_etf_code = del_etf_code.upper().strip()
+                    if any(item[0] == del_etf_code for item in hot_etfs):
+                        hot_etfs = [item for item in hot_etfs if item[0] != del_etf_code]
+                        storage.save_custom_etfs(hot_etfs)
+                        st.success(f"已成功刪除：{del_etf_code}")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.warning(f"⚠️ 在您的清單中找不到 ETF 代碼 {del_etf_code}，無法刪除。")
                 
         with col_e2:
             st.write("**最新預估配息與收益清單：**")
