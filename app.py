@@ -573,15 +573,39 @@ with tab1:
                             
                     if final_rows:
                         df_res = pd.DataFrame(final_rows)
-                        st.success(f"篩選完成！共尋獲 {len(df_res)} 檔符合條件個股。")
+                        st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：您可以直接在下方表格最左側進行多選，將選中的股票一鍵加入自選股。)")
                         
-                        st.dataframe(
+                        # 啟用多列選擇功能 (selection_mode="multi_row")
+                        event = st.dataframe(
                             df_res, 
                             column_config={
                                 "K線圖網址": st.column_config.LinkColumn("看日K線圖", display_text="開啟奇摩股市")
                             },
-                            use_container_width=True
+                            use_container_width=True,
+                            on_select="rerun",
+                            selection_mode="multi_row"
                         )
+                        
+                        # 偵測使用者選取的行數
+                        selected_rows = event.selection.rows
+                        if selected_rows:
+                            selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
+                            st.write(f"目前已選取： {', '.join(selected_codes)}")
+                            if st.button(f"📥 將這 {len(selected_codes)} 檔股票加入自選股", type="primary"):
+                                # 讀取當前 Local Watchlist
+                                current_watchlist = get_local_watchlist()
+                                added_count = 0
+                                for code in selected_codes:
+                                    if code not in current_watchlist:
+                                        current_watchlist.append(code)
+                                        added_count += 1
+                                if added_count > 0:
+                                    save_local_watchlist(current_watchlist)
+                                    st.success(f"已成功加入 {added_count} 檔股票至您的專屬自選股！")
+                                    time.sleep(0.8)
+                                    st.rerun()
+                                else:
+                                    st.info("您選取的股票早已在自選股清單中囉！")
                     else:
                         st.warning("無符合當前篩選與過濾條件之個個股，請放寬條件再試。")
                         if errors_log:
