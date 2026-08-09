@@ -13,6 +13,48 @@ import helpers
 import storage
 import data_fetcher
 
+# ==================== 瀏覽器 Local Storage 輔助管理器 ====================
+from streamlit_local_storage import LocalStorage
+
+# 初始化瀏覽器區域儲存物件
+localS = LocalStorage()
+
+def get_local_watchlist():
+    """優先從瀏覽器讀取自選股，若讀不到則以原本的備用檔案當作預設值"""
+    try:
+        val = localS.getItem("my_watchlist_local")
+        if val is not None and isinstance(val, list):
+            return val
+    except Exception:
+        pass
+    return storage.load_watchlist()
+
+def save_local_watchlist(new_list):
+    """將自選股同時存入瀏覽器，並備份一份到伺服器"""
+    try:
+        localS.setItem("my_watchlist_local", new_list)
+    except Exception:
+        pass
+    storage.save_watchlist(new_list)
+
+def get_local_piggy_bank():
+    """優先從瀏覽器讀取退休存錢筒持股"""
+    try:
+        val = localS.getItem("my_piggy_bank_local")
+        if val is not None and isinstance(val, dict):
+            return val
+    except Exception:
+        pass
+    return storage.load_piggy_bank()
+
+def save_local_piggy_bank(new_dict):
+    """將存錢筒同時存入瀏覽器與伺服器"""
+    try:
+        localS.setItem("my_piggy_bank_local", new_dict)
+    except Exception:
+        pass
+    storage.save_piggy_bank(new_dict)
+
 # ==================== 頁面基本設定 ====================
 st.set_page_config(layout="wide", page_title="台股三大法人飆股選股工具")
 
@@ -191,12 +233,10 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 # ==================== 【分頁一：三大法人選股大數據】 ====================
 with tab1:
-    # 加上這行，會自動幫裡面的元件畫上一個乾淨的圓角邊框與淺色卡片底色
-    with st.container(border=True):
-        st.subheader("核心篩選與指標過濾")
-        
-        # 用 columns 將設定元件橫向排開（注意：這幾行要往右縮排一格）
-        col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
+    st.subheader("核心篩選與指標過濾")
+    
+    # 用 columns 將設定元件橫向排開，類似原 Tkinter 的排版
+    col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
     
     with col_cfg1:
         days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
@@ -553,7 +593,7 @@ with tab2:
     st.subheader("觀察名單即時監控")
     
     # 載入自選監控
-    watchlist = storage.load_watchlist()
+    watchlist = get_local_watchlist()
     
     col_w1, col_w2 = st.columns([1, 3])
     with col_w1:
@@ -564,7 +604,7 @@ with tab2:
                 new_watchlist_code = new_watchlist_code.strip()
                 if new_watchlist_code not in watchlist:
                     watchlist.append(new_watchlist_code)
-                    storage.save_watchlist(watchlist)
+                    save_local_watchlist(watchlist)
                     st.success(f"已成功新增自選股 {new_watchlist_code}！")
                     time.sleep(0.5)
                     st.rerun()
@@ -576,12 +616,10 @@ with tab2:
             del_watchlist_code = del_watchlist_code.strip()
             if del_watchlist_code in watchlist:
                 watchlist.remove(del_watchlist_code)
-                storage.save_watchlist(watchlist)
+                save_local_watchlist(watchlist)
                 st.success(f"已成功移除自選股 {del_watchlist_code}！")
                 time.sleep(0.5)
                 st.rerun()
-            else:
-                st.warning(f"自選名單中找不到 {del_watchlist_code}。")
         
         st.write("---")
         st.write("目前監控中的股票代號：")
@@ -952,7 +990,7 @@ with tab4:
     # 退休配息存錢筒
     st.write("---")
     st.subheader("我的股息退休存錢筒 (複利配息計算機)")
-    piggy_bank_data = storage.load_piggy_bank()
+    piggy_bank_data = get_local_piggy_bank()
     
     col_p1, col_p2 = st.columns([1, 3])
     with col_p1:
@@ -962,7 +1000,7 @@ with tab4:
             if p_code:
                 p_code = p_code.upper().strip()
                 piggy_bank_data[p_code] = p_shares
-                storage.save_piggy_bank(piggy_bank_data)
+                save_local_piggy_bank(piggy_bank_data)
                 st.success(f"持股已更新：{p_code} {p_shares}張")
                 time.sleep(0.5)
                 st.rerun()
@@ -972,7 +1010,7 @@ with tab4:
             p_del = p_del.upper().strip()
             if p_del in piggy_bank_data:
                 del piggy_bank_data[p_del]
-                storage.save_piggy_bank(piggy_bank_data)
+                save_local_piggy_bank(piggy_bank_data)
                 st.success(f"已移除持股：{p_del}")
                 time.sleep(0.5)
                 st.rerun()
@@ -1047,7 +1085,7 @@ with tab5:
         col_author, col_submit = st.columns([1, 3])
         author_name = col_author.text_input("您的稱呼：", max_chars=10, value="匿名讀者")
         comment_content = st.text_area("留言內容：", max_chars=200, placeholder="歡迎在這裡分享您的想法或回饋...")
-        submitted = st.form_submit_button("送出留言")  # 👈 修正此處的函式名稱，排除 AttributeError 報錯
+        submitted = st.form_submit_button("送出留言")  # 👈 修正此處的函式名稱，排除 AttributeError 報慢
         
         if submitted:
             if not comment_content.strip():
