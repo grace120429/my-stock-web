@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 import yfinance as yf
 import time
+import json
+import os
 
 # 載入您自訂的子模組
 import config
@@ -49,6 +51,27 @@ def create_yf_session():
         "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"
     })
     return session
+
+# ==================== 留言區檔案讀寫輔助函數 ====================
+COMMENTS_FILE = "comments.json"
+
+def load_comments():
+    """載入留言"""
+    if not os.path.exists(COMMENTS_FILE):
+        return []
+    try:
+        with open(COMMENTS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_comments(comments):
+    """儲存留言"""
+    try:
+        with open(COMMENTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(comments, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"儲存留言失敗: {e}")
 
 # ==================== 網頁專用精美 HTML 除息行事曆渲染器 ====================
 def render_streamlit_calendar(year, month, events):
@@ -115,6 +138,17 @@ def get_eps_from_stmt(stmt):
             return stmt.loc[idx]
     return None
 
+def get_quarter_str(date_obj):
+    """
+    將財報日期轉換為季度標記字串，例如 2025Q3 [2]
+    """
+    try:
+        dt = pd.to_datetime(date_obj)
+        q = (dt.month - 1) // 3 + 1
+        return f"{dt.year}Q{q}"
+    except:
+        return ""
+
 # ==================== 側邊欄網站人氣統計看板 (商用無Emoji簡潔版) ====================
 st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>網站數據統計</h3>", unsafe_allow_html=True)
 
@@ -146,12 +180,13 @@ st.title("台股三大法人飆股選股工具 by Kelly")
 twd_str = data_fetcher.fetch_twd_data()
 st.info(f"{twd_str}")
 
-# ==================== 建立四大分頁 (商用精簡版) ====================
-tab1, tab2, tab3, tab4 = st.tabs([
+# ==================== 建立五大分頁 ====================
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "三大法人選股大數據", 
     "我的自選監控", 
     "主力券商進出", 
-    "台灣熱門 ETF 配息專區"
+    "台灣熱門 ETF 配息專區",
+    "讀者交流留言區"
 ])
 
 # ==================== 【分頁一：三大法人選股大數據】 ====================
@@ -181,11 +216,10 @@ with tab1:
 
     with col_cfg3:
         st.write("指標進階過濾：")
-        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+        col_f1, col_f2, col_f3 = st.columns(3)
         filter_ma = col_f1.checkbox("日線多頭排列", value=True)
         filter_macd = col_f2.checkbox("日線 MACD金叉", value=True)
-        filter_large = col_f3.checkbox("400張大戶週增持", value=True)
-        filter_rev = col_f4.checkbox("月營收雙增", value=False)
+        filter_rev = col_f3.checkbox("月營收雙增", value=False)
         filter_vol = st.checkbox("量能突破 (爆量 2x)", value=True)
 
     # 執行篩選
@@ -318,11 +352,6 @@ with tab1:
                         name = row_item['證券名稱']
                         ticker = f"{code}.TW"
                         
-                        # 400張大戶大於0篩選
-                        change_val = tdcc_changes.get(code)
-                        if filter_large and change_val is not None and change_val <= 0:
-                            continue
-                            
                         # 營收篩選
                         rev_item = revenue_data.get(code)
                         if filter_rev:
@@ -357,7 +386,7 @@ with tab1:
                                 errors_log.append(f"{code}: 歷史數據不足")
                                 continue
                                 
-                            # 核心修改：不論有沒有勾選過濾，只要是非 ETF 股票，一律下載並顯示真實的 EPS 數據！ [2]
+                            # 核心修改：不論有沒有勾選過濾，只要是非 ETF 股票，一律下載並顯示真實的 EPS 數據！
                             if not is_code_etf:
                                 try:
                                     q_stmt = stock.quarterly_income_stmt
@@ -369,12 +398,40 @@ with tab1:
                                 a_eps_series = get_eps_from_stmt(a_stmt)
                                 if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                     latest_q_eps = q_eps_series.iloc[0]
-                                    latest_a_eps = a_eps_series.iloc[0]
-                                    if pd.notna(latest_q_eps) and pd.notna(latest_a_eps):
-                                        latest_q_eps_val = f"{round(latest_q_eps, 2)} 元"
-                                        latest_a_eps_val = f"{round(latest_a_eps, 2)} 元"
+                                    
+                                    # 計算最新單季所在的季度標記 (例如 2025Q3) [2]
+                                    q_date = q_eps_series.index[0]
+                                    q_str = get_quarter_str(q_date)
+                                    
+                                    # 抓取「去年年度EPS」（例如當前為 2026 年，則主動抓取並顯示 2025 年）[2]
+                                    target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
+                                    a_eps_val = None
+                                    a_eps_year = None
+                                    for idx_date, val in a_eps_series.items():
+                                        try:
+                                            dt = pd.to_datetime(idx_date)
+                                            if dt.year == target_year:
+                                                a_eps_val = val
+                                                a_eps_year = target_year
+                                                break
+                                        except:
+                                            pass
+                                    # 備用方案：若去年年報未發布，則採用第一筆(最新一筆)年報資料
+                                    if a_eps_val is None:
+                                        try:
+                                            first_date = a_eps_series.index[0]
+                                            dt = pd.to_datetime(first_date)
+                                            a_eps_val = a_eps_series.iloc[0]
+                                            a_eps_year = dt.year
+                                        except:
+                                            pass
+                                    
+                                    if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
+                                        latest_q_eps_val = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
+                                        latest_a_eps_val = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
                                         
-                                        # 核心過濾：如果啟用了「EPS 暴增」核心選股，而個股「季 EPS <= 年 EPS」，則直接淘汰 [2]
+                                        # 核心過濾：如果啟用了「EPS 暴增」核心選股，而個股「季 EPS <= 最新年報 EPS」，則直接淘汰
+                                        latest_a_eps = a_eps_series.iloc[0]
                                         if eps_surge_active and latest_q_eps <= latest_a_eps:
                                             continue
                                     else:
@@ -453,7 +510,7 @@ with tab1:
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
                                 "最新單季EPS": latest_q_eps_val,
-                                "去年年度EPS": latest_a_eps_val,
+                                "去年年度EPS": latest_a_eps_val,  # 👈 修正為去年年度EPS [2]
                                 "月營收YoY/MoM": helpers.format_rev_growth(rev_item),  # 👈 營收緊貼放在年度EPS後面
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
@@ -591,10 +648,36 @@ with tab2:
                                 a_eps_series = get_eps_from_stmt(a_stmt)
                                 if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                     latest_q_eps = q_eps_series.iloc[0]
-                                    latest_a_eps = a_eps_series.iloc[0]
-                                    if pd.notna(latest_q_eps) and pd.notna(latest_a_eps):
-                                        latest_q_eps_val_tab2 = f"{round(latest_q_eps, 2)} 元"
-                                        latest_a_eps_val_tab2 = f"{round(latest_a_eps, 2)} 元"
+                                    
+                                    # 計算最新單季所在的季度標記 (例如 2025Q3) [2]
+                                    q_date = q_eps_series.index[0]
+                                    q_str = get_quarter_str(q_date)
+                                    
+                                    # 抓取「去年年度EPS」 (例如當前為 2026 年，則主動抓取並顯示 2025 年) [2]
+                                    target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
+                                    a_eps_val = None
+                                    a_eps_year = None
+                                    for idx_date, val in a_eps_series.items():
+                                        try:
+                                            dt = pd.to_datetime(idx_date)
+                                            if dt.year == target_year:
+                                                a_eps_val = val
+                                                a_eps_year = target_year
+                                                break
+                                        except:
+                                            pass
+                                    if a_eps_val is None:
+                                        try:
+                                            first_date = a_eps_series.index[0]
+                                            dt = pd.to_datetime(first_date)
+                                            a_eps_val = a_eps_series.iloc[0]
+                                            a_eps_year = dt.year
+                                        except:
+                                            pass
+                                    
+                                    if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
+                                        latest_q_eps_val_tab2 = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
+                                        latest_a_eps_val_tab2 = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
                                     else:
                                         latest_q_eps_val_tab2 = "N/A"
                                         latest_a_eps_val_tab2 = "N/A"
@@ -603,6 +686,7 @@ with tab2:
                                     latest_a_eps_val_tab2 = "N/A"
                             except:
                                 latest_q_eps_val_tab2 = "N/A"
+                                latest_a_eps_val_tab2 = "N/A"
                                 
                         price = hist['Close'].iloc[-1]
                         prev_price = hist['Close'].iloc[-2]
@@ -659,7 +743,7 @@ with tab2:
                             "現價": round(price, 1),
                             "漲跌幅(%)": round(pct_change, 2),
                             "最新單季EPS": latest_q_eps_val_tab2,  # 👈 EPS 數據
-                            "最新年度EPS": latest_a_eps_val_tab2,  # 👈 EPS 數據
+                            "去年年度EPS": latest_a_eps_val_tab2,  # 👈 修正為去年年度EPS [2]
                             "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),  # 👈 營收緊貼放在EPS後面
                             "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",  # 👈 大戶比例緊貼放在營收後面
                             "日K_MACD": macd_daily_status,
@@ -948,3 +1032,82 @@ with tab4:
             )
         else:
             st.info("存錢筒目前無持股，請新增您的 ETF 持股比例。")
+
+# ==================== 【分頁五：讀者交流留言區】 ====================
+with tab5:
+    st.subheader("💬 讀者交流留言區")
+    
+    # 載入現有留言
+    comments = load_comments()
+    
+    # 留言發表表單
+    with st.form("comment_form", clear_on_submit=True):
+        col_author, col_submit = st.columns([1, 3])
+        author_name = col_author.text_input("您的稱呼：", max_chars=10, value="匿名讀者")
+        comment_content = st.text_area("留言內容：", max_chars=200, placeholder="歡迎在這裡分享您的想法或回饋...")
+        submitted = st.form_submit_with_button("送出留言")
+        
+        if submitted:
+            if not comment_content.strip():
+                st.warning("請填寫留言內容！")
+            else:
+                # 建立新留言資料
+                new_comment = {
+                    "id": int(time.time() * 1000),  # 以毫秒級時間戳記做為唯一識別 ID
+                    "time": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
+                    "author": author_name.strip() if author_name.strip() else "匿名讀者",
+                    "content": comment_content.strip()
+                }
+                comments.append(new_comment)
+                save_comments(comments)
+                st.success("留言發表成功！")
+                time.sleep(0.5)
+                st.rerun()
+                
+    st.write("---")
+    st.write(f"目前共有 {len(comments)} 條留言：")
+    
+    if not comments:
+        st.info("目前尚無留言，歡迎成為第一個留言的人！")
+    else:
+        # 倒序顯示，最新發表的留言置頂
+        for msg in reversed(comments):
+            st.markdown(
+                f"""
+                <div style='background-color: #f8f9fa; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 5px solid #007bff;'>
+                    <span style='font-weight: bold; color: #333;'>{msg['author']}</span> 
+                    <span style='color: gray; font-size: 11px; margin-left: 10px;'>{msg['time']}</span>
+                    <p style='margin-top: 5px; color: #555; font-size: 14px; white-space: pre-wrap;'>{msg['content']}</p>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+            
+    # ==================== 後台管理區 ====================
+    st.write("---")
+    with st.expander("🛠️ 留言板後台管理功能"):
+        # 提供密碼保護，避免一般訪客誤觸
+        admin_pwd = st.text_input("請輸入管理員密碼：", type="password", key="admin_pwd_input")
+        
+        # 預設後台管理密碼：admin888
+        if admin_pwd == "admin888":
+            st.success("身分驗證成功！已開啟管理權限。")
+            if not comments:
+                st.info("目前沒有留言可供管理。")
+            else:
+                st.write("選擇要刪除的留言：")
+                for msg in comments:
+                    col_msg_info, col_del_btn = st.columns([5, 1])
+                    # 預覽顯示格式
+                    col_msg_info.write(f"【{msg['author']}】({msg['time']}): {msg['content'][:30]}...")
+                    
+                    # 點擊對應按鈕即刪除
+                    if col_del_btn.button("刪除此留言", key=f"del_{msg['id']}", type="secondary"):
+                        # 過濾掉該筆 ID 的留言並寫回檔案
+                        comments = [c for c in comments if c["id"] != msg["id"]]
+                        save_comments(comments)
+                        st.success("留言已順利刪除！")
+                        time.sleep(0.5)
+                        st.rerun()
+        elif admin_pwd:
+            st.error("密碼輸入錯誤，請重新確認！")
