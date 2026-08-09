@@ -118,7 +118,7 @@ def get_eps_from_stmt(stmt):
 # ==================== 側邊欄網站人氣統計看板 ====================
 st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>📊 網站數據統計</h3>", unsafe_allow_html=True)
 
-# 👈 核心修正：使用 hitscounter.dev 雲端接口代替已關閉的 seeyoufarm，完美恢復瀏覽量統計 (綁定 grace120429 確保全球唯一累計)
+# 雲端永久人氣計數器 (使用 hitscounter.dev 提供永久累積與更新，綁定您的專屬帳號)
 visitor_badge_url = "https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fgrace120429%2Fmy-stock-web&label=Total%20Views&color=%23007bff"
 
 st.sidebar.markdown(
@@ -159,20 +159,21 @@ with tab1:
     st.subheader("🛠️ 核心篩選與指標過濾")
     
     # 用 columns 將設定元件橫向排開，類似原 Tkinter 的排版
-    col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
+    col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.3, 1.9])
     
     with col_cfg1:
         days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
         
     with col_cfg2:
-        st.write("**核心籌碼與信用篩選 (多選，不依賴三大法人時可只勾融資)：**")
-        col_m1, col_m2, col_m3, col_m4, col_m5, col_m6 = st.columns(6)
+        st.write("**核心籌碼、信用與基本面要素（勾選單項即可全市場排行篩選）：**")
+        col_m1, col_m2, col_m3, col_m4, col_m5, col_m6, col_m7 = st.columns(7)
         f_active = col_m1.checkbox("外資", value=True)
         t_active = col_m2.checkbox("投信", value=False)
         d_active = col_m3.checkbox("自營商", value=True)
         m_active = col_m4.checkbox("融資 (資增)", value=True)
-        m_balance_active = col_m5.checkbox("融資 (餘額最高)", value=False)  # 全市場融資最大量排行選項
-        b_active = col_m6.checkbox("分點券商", value=False)
+        m_balance_active = col_m5.checkbox("融資 (餘額最高)", value=False)  # 融資最大量排行選項
+        eps_surge_active = col_m6.checkbox("EPS 暴增", value=False)  # 👈 核心修正：將「EPS暴增」升級移至左側核心欄位！
+        b_active = col_m7.checkbox("分點券商", value=False)
         
         # 動態載入自訂分點下拉選單
         brokers_dict = storage.load_custom_brokers()
@@ -180,12 +181,11 @@ with tab1:
 
     with col_cfg3:
         st.write("**指標進階過濾：**")
-        col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         filter_ma = col_f1.checkbox("日線多頭排列", value=True)
         filter_macd = col_f2.checkbox("日線 MACD金叉", value=True)
         filter_large = col_f3.checkbox("400張大戶週增持", value=True)
         filter_rev = col_f4.checkbox("月營收雙增", value=False)
-        filter_eps_surge = col_f5.checkbox("EPS 暴增 (季 > 年)", value=False)  # EPS獨立面進階過濾
         filter_vol = st.checkbox("量能突破 (爆量 2x)", value=False)
 
     # 執行篩選
@@ -271,10 +271,11 @@ with tab1:
                 filtered_summary = summary.copy()
                 filtered_summary['排序得分'] = 0.0
                 
-                # 安全阻攔機制
-                if not (f_active or t_active or d_active or m_active or m_balance_active or b_active):
-                    st.warning("請至少勾選一個核心篩選指標！")
+                # 安全阻攔機制 (只要有勾選其中一項即可執行，包含只勾 EPS 暴增)
+                if not (f_active or t_active or d_active or m_active or m_balance_active or eps_surge_active or b_active):
+                    st.warning("請至少勾選一個核心選股要素指標！")
                 else:
+                    # 1. 核心籌碼加權分計算
                     if f_active:
                         filtered_summary = filtered_summary[filtered_summary['外資_張'] > 0]
                         filtered_summary['排序得分'] += filtered_summary['外資_張']
@@ -294,7 +295,18 @@ with tab1:
                         filtered_summary = filtered_summary[filtered_summary['分點_萬'] > 0]
                         filtered_summary['排序得分'] += filtered_summary['分點_萬'] / 10.0
                     
-                    top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(50)
+                    # 👈 核心機制：如果「完全不勾三大法人與信用融資」，只勾選「EPS 暴增」進行獨立選股
+                    # 程式會直接以「市場法人交易量＋融資總量最大、最活絡的前 80 檔」做為基礎池，避開法人足跡，領先布局基本面爆發個股！
+                    if eps_surge_active and not (f_active or t_active or d_active or m_active or m_balance_active or b_active):
+                        filtered_summary['排序得分'] = (
+                            filtered_summary[col_foreign].abs() / 1000 + 
+                            filtered_summary[col_trust].abs() / 1000 + 
+                            filtered_summary[col_dealer].abs() / 1000 + 
+                            filtered_summary['融資_餘額'] / 10.0
+                        )
+                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(80)
+                    else:
+                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(50)
                     
                     # 逐檔分析多週期與技術面指標
                     final_rows = []
@@ -319,21 +331,17 @@ with tab1:
                             if not rev_item or rev_item.get("yoy", 0) <= 0 or rev_item.get("mom", 0) <= 0:
                                 continue
                         
-                        # 智慧型人性化提示初始化
+                        # 智慧型提示初始化
                         is_code_etf = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
                         
-                        if is_code_etf:
-                            latest_q_eps_val = "ETF無EPS"
-                            latest_a_eps_val = "ETF無EPS"
-                        else:
-                            latest_q_eps_val = "N/A"
-                            latest_a_eps_val = "N/A"
+                        # 👈 智慧過濾：如果啟用了「EPS 暴增」核心選股，而個股是 ETF，直接淘汰跳過（省去下載財報時間）
+                        if eps_surge_active and is_code_etf:
+                            continue
+                        
+                        latest_q_eps_val = "ETF無EPS" if is_code_etf else "載入中..."
+                        latest_a_eps_val = "ETF無EPS" if is_code_etf else "載入中..."
                         
                         try:
-                            # 智慧優化：如果勾選了 EPS 暴增過濾，但當下個股是 ETF，直接淘汰跳過（省去下載財報時間）
-                            if filter_eps_surge and is_code_etf:
-                                continue
-                            
                             time.sleep(0.15)  # 禮貌防阻擋安全等待
                             
                             # 無條件在此先一步建立 stock 對象 (解決在快取讀取時變數 undefined 崩潰)
@@ -351,7 +359,7 @@ with tab1:
                                 errors_log.append(f"{code}: 歷史數據不足")
                                 continue
                                 
-                            # 👈 核心修改：無論是否勾選過濾，只要是非 ETF 股票，一律下載並顯示最新單季與年度 EPS
+                            # 👈 核心修改：不論有沒有勾選過濾，只要是非 ETF 股票，一律下載並顯示真實的 EPS 數據！ [2]
                             if not is_code_etf:
                                 try:
                                     q_stmt = stock.quarterly_income_stmt
@@ -368,15 +376,15 @@ with tab1:
                                         latest_q_eps_val = f"{round(latest_q_eps, 2)} 元"
                                         latest_a_eps_val = f"{round(latest_a_eps, 2)} 元"
                                         
-                                        # 如果勾選了 EPS 暴增過濾，但此時個股「季 EPS <= 年 EPS」，則淘汰不加入表格 [2]
-                                        if filter_eps_surge and latest_q_eps <= latest_a_eps:
+                                        # 👈 核心過濾：如果啟用了「EPS 暴增」核心選股，而個股「季 EPS <= 年 EPS」，則直接淘汰 [2]
+                                        if eps_surge_active and latest_q_eps <= latest_a_eps:
                                             continue
                                     else:
-                                        if filter_eps_surge:
-                                            continue  # 數據缺值且啟用了過濾，淘汰
+                                        if eps_surge_active:
+                                            continue  # 數據缺值，淘汰
                                 else:
-                                    if filter_eps_surge:
-                                        continue  # 財報無EPS資訊且啟用了過濾，淘汰
+                                    if eps_surge_active:
+                                        continue  # 財報無資訊，淘汰
                                 
                             # 計算均線
                             hist['MA5'] = hist['Close'].rolling(5).mean()
@@ -435,8 +443,8 @@ with tab1:
                                 "股票名稱": name,
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
-                                "最新單季EPS": latest_q_eps_val,  # 👈 更新：無條件載入顯示最新單季EPS數值
-                                "最新年度EPS": latest_a_eps_val,  # 👈 更新：無條件載入顯示最新年度EPS數值
+                                "最新單季EPS": latest_q_eps_val,  # 👈 直接顯示：最新單季EPS
+                                "最新年度EPS": latest_a_eps_val,  # 👈 直接顯示：最新年度EPS
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
@@ -542,7 +550,7 @@ with tab2:
                     ticker = f"{code}.TW"
                     name = data_fetcher.fetch_stock_name_fast(code)
                     
-                    # 智慧型人性化提示初始化 (分頁二同步支援)
+                    # 智慧型提示初始化 (分頁二同步支援)
                     is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
                     latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
                     latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
@@ -561,7 +569,7 @@ with tab2:
                             errors_log_tab2.append(f"{code}: 歷史K線數據不足")
                             continue
                             
-                        # 👈 核心新增：分頁二（自選監控）自動載入最新年度與單季 EPS 數據
+                        # 👈 分頁二（自選監控）自動載入最新年度與單季 EPS 數據
                         if not is_code_etf_tab2:
                             try:
                                 try:
@@ -586,7 +594,6 @@ with tab2:
                                     latest_a_eps_val_tab2 = "N/A"
                             except:
                                 latest_q_eps_val_tab2 = "N/A"
-                                latest_a_eps_val_tab2 = "N/A"
                                 
                         price = hist['Close'].iloc[-1]
                         prev_price = hist['Close'].iloc[-2]
@@ -631,8 +638,8 @@ with tab2:
                             "股票名稱": name,
                             "現價": round(price, 1),
                             "漲跌幅(%)": round(pct_change, 2),
-                            "最新單季EPS": latest_q_eps_val_tab2,  # 👈 新增自選股單季EPS欄位
-                            "最新年度EPS": latest_a_eps_val_tab2,  # 👈 新增自選股年度EPS欄位
+                            "最新單季EPS": latest_q_eps_val_tab2,  # 新增自選股單季EPS
+                            "最新年度EPS": latest_a_eps_val_tab2,  # 新增自選股年度EPS
                             "日K_MACD": macd_daily_status,
                             "60分K_MACD": macd_60m_status,
                             "趨勢狀態": alert_str_display,
