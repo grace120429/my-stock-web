@@ -119,6 +119,30 @@ def save_comments(comments):
     except Exception as e:
         st.error(f"儲存留言失敗: {e}")
 
+# ==================== 側邊欄公告檔案讀寫輔助函數 ====================
+ANNOUNCEMENT_FILE = "announcement.json"
+
+def load_announcement():
+    """載入側邊欄公告"""
+    if not os.path.exists(ANNOUNCEMENT_FILE):
+        return {
+            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
+            "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+        }
+    try:
+        with open(ANNOUNCEMENT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {"content": "歡迎使用選股工具！", "date": ""}
+
+def save_announcement(data):
+    """儲存側邊欄公告"""
+    try:
+        with open(ANNOUNCEMENT_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"儲存公告失敗: {e}")
+
 # ==================== 網頁專用精美 HTML 除息行事曆渲染器 ====================
 def render_streamlit_calendar(year, month, events):
     """
@@ -195,7 +219,7 @@ def get_quarter_str(date_obj):
     except:
         return ""
 
-# ==================== 側邊欄網站人氣統計看板 (商用無Emoji簡潔版) ====================
+# ==================== 側邊欄網站人氣統計與公告看板 ====================
 st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>網站數據統計</h3>", unsafe_allow_html=True)
 
 # 雲端永久人氣計數器 (使用 hitscounter.dev 提供永久累積與更新，網址經由 URL 編碼確保唯一性)
@@ -214,6 +238,20 @@ st.sidebar.markdown(
     """
     <div style='text-align: center; color: gray; font-size: 11px;'>
         提示：本計數器由雲端數據庫提供永久累計，每一次頁面載入皆會即時更新。
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# 側邊欄管理者公告看板
+st.sidebar.write("---")
+st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>📢 管理者公告</h3>", unsafe_allow_html=True)
+ann_data = load_announcement()
+st.sidebar.markdown(
+    f"""
+    <div style='background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);'>
+        <p style='color: #64748b; font-size: 11px; font-weight: 500; margin-bottom: 6px;'>更新時間：{ann_data.get('date', 'N/A')}</p>
+        <p style='color: #1e293b; font-size: 13px; white-space: pre-wrap; line-height: 1.5; margin-bottom: 0;'>{ann_data.get('content', '暫無公告')}</p>
     </div>
     """,
     unsafe_allow_html=True
@@ -575,6 +613,7 @@ with tab1:
                             continue
                             
                 if final_rows:
+                    # 將成功篩選出的名單寫入記憶體中
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
@@ -598,6 +637,7 @@ with tab1:
                 key="df_res_table_stable"
             )
             
+            # 偵測並讀取使用者選取的行數
             selected_rows = event.selection.rows
             if selected_rows:
                 selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
@@ -642,7 +682,7 @@ with tab2:
                 else:
                     st.info(f"股票代號 {new_watchlist_code} 已存在於自選名單中。")
                     
-        # 👈 核心修改：原本的文字移除輸入框，替換為優雅的批次勾選下拉移除選單
+        # 批次勾選下拉移除選單
         st.write("---")
         st.write("批次移除自選股")
         if watchlist:
@@ -688,7 +728,7 @@ with tab2:
             # 建立線程安全獨立 Session
             yf_session_tab2 = create_yf_session()
             
-            with st.spinner("正在分析自選股趨勢與支撐壓力點，請稍候..."):
+            with st.spinner("正在分析自選股趨勢與支撐壓力點，請慢候..."):
                 revenue_data = data_fetcher.fetch_monthly_revenue()
                 tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
                 tdcc_ratios, tdcc_changes = {}, {}
