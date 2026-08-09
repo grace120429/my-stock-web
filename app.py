@@ -268,7 +268,7 @@ with tab1:
         filter_rev = col_f3.checkbox("月營收雙增", value=False)
         filter_vol = st.checkbox("量能突破 (爆量 2x)", value=True)
 
-    # 執行篩選按鈕
+    # 執行篩選
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
         with st.spinner("正在進行大數據分析，請稍候..."):
             # 1. 抓取三大法人數據
@@ -575,19 +575,18 @@ with tab1:
                             continue
                             
                 if final_rows:
-                    # 將成功篩選出的名單寫入記憶體中
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
                     st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
 
-    # ==================== 關鍵修改：將表格渲染抽到「按鈕條件之外」 ====================
+    # 將大數據篩選的結果表格移到按鈕區塊外（保證勾選時不消失）
     if st.session_state.tab1_results is not None:
         if len(st.session_state.tab1_results) > 0:
             df_res = pd.DataFrame(st.session_state.tab1_results)
             st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：您可以直接在下方表格最左側進行多選，將選中的股票一鍵加入自選股。)")
             
-            # 使用正確的官方標準 "multi-row" 
+            # 啟用列選取功能 (selection_mode="multi-row")
             event = st.dataframe(
                 df_res, 
                 column_config={
@@ -596,16 +595,14 @@ with tab1:
                 use_container_width=True,
                 on_select="rerun",
                 selection_mode="multi-row",
-                key="df_res_table_stable"  # 給予表格固定 Key，確保多選重新整理時狀態穩定
+                key="df_res_table_stable"
             )
             
-            # 偵測並讀取使用者選取的行數
             selected_rows = event.selection.rows
             if selected_rows:
                 selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
                 st.write(f"目前已選取： {', '.join(selected_codes)}")
                 if st.button(f"📥 將這 {len(selected_codes)} 檔股票加入自選股", type="primary", key="btn_add_selected_stable"):
-                    # 讀取當前 Local Watchlist
                     current_watchlist = get_local_watchlist()
                     added_count = 0
                     for code in selected_codes:
@@ -620,7 +617,7 @@ with tab1:
                     else:
                         st.info("您選取的股票早已在自選股清單中囉！")
         else:
-            st.warning("查無符合過濾條件之個股。")
+            st.warning("查無符合篩選條件之個股。")
 
 # ==================== 【分頁二：我的自選監控】 ====================
 with tab2:
@@ -645,15 +642,27 @@ with tab2:
                 else:
                     st.info(f"股票代號 {new_watchlist_code} 已存在於自選名單中。")
                     
-        del_watchlist_code = st.text_input("輸入股票代號移除自選：", max_chars=6, key="del_w")
-        if st.button("移除自選項目", type="secondary"):  # 商用版：移除表情符號
-            del_watchlist_code = del_watchlist_code.strip()
-            if del_watchlist_code in watchlist:
-                watchlist.remove(del_watchlist_code)
-                save_local_watchlist(watchlist)
-                st.success(f"已成功移除自選股 {del_watchlist_code}！")
-                time.sleep(0.5)
-                st.rerun()
+        # 👈 核心修改：原本的文字移除輸入框，替換為優雅的批次勾選下拉移除選單
+        st.write("---")
+        st.write("批次移除自選股")
+        if watchlist:
+            remove_targets = st.multiselect(
+                "選擇要移除的股票：",
+                options=watchlist,
+                default=[],
+                help="您可以直接勾選一或多個代號，進行批次刪除"
+            )
+            if st.button("批次移除選中項目", type="secondary"):
+                if remove_targets:
+                    updated_watchlist = [code for code in watchlist if code not in remove_targets]
+                    save_local_watchlist(updated_watchlist)
+                    st.success(f"已成功移除：{', '.join(remove_targets)}！")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.warning("請先在上方下拉選單選取要移除的股票代號！")
+        else:
+            st.caption("目前無監控股票，無法進行移除。")
         
         st.write("---")
         st.write("目前監控中的股票代號：")
