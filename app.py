@@ -162,7 +162,7 @@ with tab1:
     col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
     
     with col_cfg1:
-        days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
+        days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
         
     with col_cfg2:
         st.write("核心籌碼與信用篩選：")
@@ -306,7 +306,7 @@ with tab1:
                     else:
                         top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(50)
                     
-                    # 逐檔分析多週期與技術面指標
+                    # 逐檔 analysis 多週期與技術面指標
                     final_rows = []
                     errors_log = []  # 收集下載錯誤用
                     
@@ -409,14 +409,19 @@ with tab1:
                             vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
                             ma_status_display = f"{ma_status} ({vol_status_str})"
                             
-                            # MACD 計算 (商用版：過濾掉表情符號)
+                            # MACD 計算 (台股常規：空頭時以綠色 🟢 表示警告，多頭時以紅色 🔴 表示)
                             latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
-                            macd_daily_status = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
+                            raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
+                            
+                            if latest_osc_daily is not None and latest_osc_daily <= 0:
+                                macd_daily_status = f"🟢 {raw_macd_daily}"
+                            else:
+                                macd_daily_status = f"🔴 {raw_macd_daily}"
                             
                             if filter_macd and "MACD金叉" not in macd_daily_status and "多頭" not in macd_daily_status:
                                 continue
                                 
-                            # 60分K MACD
+                            # 60分K MACD (同樣依台股常規套用 🟢/🔴 色彩標誌)
                             try:
                                 if ticker in st.session_state.yf_60m_cache:
                                     hist_60m = st.session_state.yf_60m_cache[ticker]
@@ -426,7 +431,12 @@ with tab1:
                                     if not hist_60m.empty:
                                         st.session_state.yf_60m_cache[ticker] = hist_60m
                                 latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
-                                macd_60m_status = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                                raw_macd_60m = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                                
+                                if latest_osc_60m is not None and latest_osc_60m <= 0:
+                                    macd_60m_status = f"🟢 {raw_macd_60m}"
+                                else:
+                                    macd_60m_status = f"🔴 {raw_macd_60m}"
                             except:
                                 macd_60m_status = "N/A"
                                 
@@ -598,16 +608,26 @@ with tab2:
                         prev_price = hist['Close'].iloc[-2]
                         pct_change = ((price - prev_price) / prev_price) * 100
                         
-                        # MACD 與警示 (商用版：過濾掉表情符號)
+                        # MACD 與警示 (依台股常規調整色彩：空頭🟢，多頭🔴)
                         latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
-                        macd_daily_status = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
+                        raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                         
-                        # 60m MACD
+                        if latest_osc_daily is not None and latest_osc_daily <= 0:
+                            macd_daily_status = f"🟢 {raw_macd_daily}"
+                        else:
+                            macd_daily_status = f"🔴 {raw_macd_daily}"
+                        
+                        # 60m MACD (同樣依台股常規套用🟢/🔴)
                         try:
                             stock_60m = yf.Ticker(ticker, session=yf_session_tab2)
                             hist_60m = stock_60m.history(interval="60m", period="1mo")
                             latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
-                            macd_60m_status = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                            raw_macd_60m = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                            
+                            if latest_osc_60m is not None and latest_osc_60m <= 0:
+                                macd_60m_status = f"🟢 {raw_macd_60m}"
+                            else:
+                                macd_60m_status = f"🔴 {raw_macd_60m}"
                         except:
                             macd_60m_status = "N/A"
                             latest_osc_60m = None
@@ -615,13 +635,13 @@ with tab2:
                         is_daily_bear = (latest_osc_daily is not None and latest_osc_daily <= 0)
                         is_60m_bear = (latest_osc_60m is not None and latest_osc_60m <= 0)
                         if is_daily_bear and is_60m_bear:
-                            alert_str = "賣出警示 (MACD雙空)"
+                            alert_str = "🟢 賣出警示 (MACD雙空)"
                         elif is_daily_bear and not is_60m_bear:
-                            alert_str = "先驅起漲 (日空/短轉強)"
+                            alert_str = "🟡 先驅起漲 (日空/短轉強)"
                         elif not is_daily_bear and is_60m_bear:
-                            alert_str = "短線修正 (日多/短轉弱)"
+                            alert_str = "🟡 短線修正 (日多/短轉弱)"
                         else:
-                            alert_str = "趨勢強勢 (MACD雙多)"
+                            alert_str = "🔴 趨勢強勢 (MACD雙多)"
                         
                         # 自選股同步運算量能突破，並拼接進狀態欄
                         latest_vol = hist['Volume'].iloc[-1]
