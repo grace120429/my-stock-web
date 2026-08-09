@@ -1,0 +1,7 @@
+streamlit
+pandas
+yfinance
+requests
+beautifulsoup4
+urllib3
+ttkbootstrap
