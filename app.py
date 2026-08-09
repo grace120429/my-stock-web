@@ -575,7 +575,7 @@ with tab1:
                         df_res = pd.DataFrame(final_rows)
                         st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：您可以直接在下方表格最左側進行多選，將選中的股票一鍵加入自選股。)")
                         
-                        # 啟用多列選擇功能 (selection_mode="multi_row")
+                        # 修正這裡：將 selection_mode 改為標準官方的 "multi-row"（使用減號）
                         event = st.dataframe(
                             df_res, 
                             column_config={
@@ -583,7 +583,7 @@ with tab1:
                             },
                             use_container_width=True,
                             on_select="rerun",
-                            selection_mode="multi_row"
+                            selection_mode="multi-row"
                         )
                         
                         # 偵測使用者選取的行數
