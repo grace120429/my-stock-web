@@ -98,6 +98,23 @@ def render_streamlit_calendar(year, month, events):
     """
     return html_table
 
+# ==================== 雅虎財報 EPS 欄位模糊相容性解析器 ====================
+def get_eps_from_stmt(stmt):
+    """
+    自動適應雅虎財報在不同時期、不同個股所回傳的 EPS 欄位鍵名
+    """
+    if stmt is None or stmt.empty:
+        return None
+    # 遍歷常見的雅虎財報 EPS 欄位名稱
+    for key in ['Basic EPS', 'Diluted EPS', 'BasicEarningsPerShare', 'DilutedEarningsPerShare', 'Basic', 'Diluted']:
+        if key in stmt.index:
+            return stmt.loc[key]
+    # 模糊比對
+    for idx in stmt.index:
+        if "EPS" in str(idx) or "Earnings Per Share" in str(idx):
+            return stmt.loc[idx]
+    return None
+
 # ==================== 頁首資訊 ====================
 st.title("🖥️ 台股三大法人選股工具 by Kelly (網頁版)")
 
@@ -105,12 +122,24 @@ st.title("🖥️ 台股三大法人選股工具 by Kelly (網頁版)")
 twd_str = data_fetcher.fetch_twd_data()
 st.info(f"{twd_str}")
 
-# ==================== 建立四大分頁 ====================
-tab1, tab2, tab3, tab4 = st.tabs([
+# ==================== 🔒 私人資料庫鎖定機制 ====================
+st.sidebar.subheader("🔒 私人資料庫鎖定")
+# 輸入密碼 (輸入時會自動隱藏為 ●●●)
+user_password = st.sidebar.text_input("輸入解鎖密碼查看個人資料：", type="password")
+
+# 檢查是否為本人解鎖 (這裡密碼預設為 kelly2026，您可以自由修改)
+is_kelly = (user_password == "kelly2026")
+
+if is_kelly:
+    st.sidebar.success("🔑 解鎖成功！已載入您的個人資料。")
+
+# ==================== 建立五大分頁 ====================
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔍 三大法人選股大數據", 
     "📌 我的自選監控", 
     "📊 主力券商進出", 
-    "📈 台灣熱門 ETF 配息專區"
+    "📈 台灣熱門 ETF 配息專區",
+    "📊 獨立指標與融資排行 (不依賴三大法人)"
 ])
 
 # ==================== 【分頁一：三大法人選股大數據】 ====================
@@ -143,7 +172,7 @@ with tab1:
         filter_macd = col_f2.checkbox("日線 MACD金叉", value=True)
         filter_large = col_f3.checkbox("400張大戶週增持", value=True)
         filter_rev = col_f4.checkbox("月營收雙增", value=False)
-        filter_vol = st.checkbox("量能突破 (爆量 2x)", value=True)
+        filter_vol = st.checkbox("量能突破 (爆量 2x)", value=False)
 
     # 執行篩選
     if st.button("🔍 開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
@@ -349,6 +378,7 @@ with tab1:
                             "日K_MACD": macd_daily_status,
                             "60m_MACD": macd_60m_status,
                             "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
+                            # 已成功移除「大戶週變動」欄位
                             "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
                             "月營收YoY/MoM": helpers.format_rev_growth(rev_item),
                             "短期支壓(1M)": sr_1m,
@@ -421,10 +451,8 @@ with tab2:
     with col_w2:
         st.write("**📊 自選股雙週期趨勢與警示看板**")
         
-        # 體驗升級：直接自動顯示，免去點擊按鈕沒反應的困擾，並提供一個手動重新整理按鈕
         if watchlist:
             if st.button("🔄 手動重新整理自選數據"):
-                # 清空快取強迫重新下載
                 st.session_state.yf_cache.clear()
                 st.session_state.yf_60m_cache.clear()
                 st.success("快取已清除，正在重新抓取...")
@@ -448,9 +476,8 @@ with tab2:
                     ticker = f"{code}.TW"
                     name = data_fetcher.fetch_stock_name_fast(code)
                     try:
-                        time.sleep(0.15)  # 禮貌防阻擋安全等待
+                        time.sleep(0.15)  # 安全等待
                         
-                        # 使用 Session
                         stock = yf.Ticker(ticker, session=yf_session_tab2)
                         hist = stock.history(period="6mo")
                         if hist.empty:
@@ -735,7 +762,7 @@ with tab4:
         pb_rows = []
         total_market_value = 0.0
         total_annual_dividend = 0.0
-        total_selected_month_dividend = 0.0  # 核心改動：改為該月份實際預估配息收入
+        total_selected_month_dividend = 0.0  # 該月份實際預估配息收入
         
         for code, shares in piggy_bank_data.items():
             data = data_fetcher.fetch_etf_dividend_details(code, upcoming_dict)
@@ -776,7 +803,7 @@ with tab4:
         if pb_rows:
             st.dataframe(pd.DataFrame(pb_rows), use_container_width=True)
             
-            # 統計看板 (核心修正：動態顯示目前選定月份的實質配息收入)
+            # 統計看板
             col_stat1, col_stat2, col_stat3 = st.columns(3)
             col_stat1.metric("📊 總持股市值", f"{int(total_market_value):,} 元")
             col_stat2.metric("💰 預估年領總股息", f"{int(total_annual_dividend):,} 元")
@@ -787,3 +814,156 @@ with tab4:
             )
         else:
             st.info("存錢筒目前無持股，請新增您的 ETF 持股比例。")
+
+# ==================== 【分頁五：獨立指標與融資排行 (不依賴三大法人)】 ====================
+with tab5:
+    st.subheader("📊 擺脫三大法人！基本面 EPS 篩選與信用融資排行榜")
+    
+    col_t5_left, col_t5_right = st.columns(2)
+    
+    with col_t5_left:
+        st.write("### 📈 工具一：自選股「EPS 暴增」檢測器 (單季 EPS > 去年整年 EPS)")
+        st.write("本功能直接至 Yahoo Finance 下載您目前自選股的最新年度與季度財務報表，比較其 `最新單季 EPS` 是否大於 `去年整年 EPS`。")
+        
+        # 載入自選監控
+        watchlist_t5 = storage.load_watchlist()
+        if not watchlist_t5:
+            st.info("💡 您的自選觀察名單目前為空，請先到『我的自選監控』加入股票代號！")
+        else:
+            if st.button("🚀 開始檢測自選股 EPS 暴增狀態", key="btn_run_eps_surge"):
+                eps_rows = []
+                yf_session_tab5 = create_yf_session()
+                
+                with st.spinner("正在下載並分析自選股季度與年度財務報表，請稍候..."):
+                    for code in watchlist_t5:
+                        ticker = f"{code}.TW"
+                        name = data_fetcher.fetch_stock_name_fast(code)
+                        try:
+                            time.sleep(0.15)  # 安全延遲
+                            stock = yf.Ticker(ticker, session=yf_session_tab5)
+                            
+                            # 獲取年度與季度損益表
+                            try:
+                                q_stmt = stock.quarterly_income_stmt
+                                a_stmt = stock.income_stmt
+                            except:
+                                q_stmt = stock.quarterly_financials
+                                a_stmt = stock.financials
+                                
+                            q_eps_series = get_eps_from_stmt(q_stmt)
+                            a_eps_series = get_eps_from_stmt(a_stmt)
+                            
+                            if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
+                                latest_q_eps = q_eps_series.iloc[0]  # 最新一季的 EPS
+                                latest_a_eps = a_eps_series.iloc[0]  # 最新一年的 EPS
+                                
+                                if pd.notna(latest_q_eps) and pd.notna(latest_a_eps):
+                                    diff = latest_q_eps - latest_a_eps
+                                    is_surge = "🔥 暴增 (季 > 年)" if latest_q_eps > latest_a_eps else "❌ 未暴增"
+                                    
+                                    eps_rows.append({
+                                        "代號": code,
+                                        "股票名稱": name,
+                                        "最新單季 EPS": round(latest_q_eps, 2),
+                                        "最新年度 EPS": round(latest_a_eps, 2),
+                                        "差額 (季-年)": round(diff, 2),
+                                        "暴增狀態": is_surge
+                                    })
+                                else:
+                                    eps_rows.append({
+                                        "代號": code,
+                                        "股票名稱": name,
+                                        "最新單季 EPS": "N/A",
+                                        "最新年度 EPS": "N/A",
+                                        "差額 (季-年)": "N/A",
+                                        "暴增狀態": "⚠️ 數據缺值"
+                                    })
+                            else:
+                                eps_rows.append({
+                                    "代號": code,
+                                    "股票名稱": name,
+                                    "最新單季 EPS": "N/A",
+                                    "最新年度 EPS": "N/A",
+                                    "差額 (季-年)": "N/A",
+                                    "暴增狀態": "⚠️ 財報無EPS資訊"
+                                })
+                        except Exception as ex_eps:
+                            eps_rows.append({
+                                "代號": code,
+                                "股票名稱": name,
+                                "最新單季 EPS": "N/A",
+                                "最新年度 EPS": "N/A",
+                                "差額 (季-年)": "N/A",
+                                "暴增狀態": f"⚠️ 下載失敗: {str(ex_eps)}"
+                            })
+                            continue
+                            
+                if eps_rows:
+                    st.dataframe(pd.DataFrame(eps_rows), use_container_width=True)
+                else:
+                    st.warning("檢測結束，無有效財務報表資料。")
+                    
+    with col_t5_right:
+        st.write("### 📊 工具二：全市場「信用交易融資」排行榜 ( Listed + OTC )")
+        st.write("本功能直接向證交所與櫃買中心獲取最新一期全市場信用交易明細，直接為您找出目前融資最多或融資增加最多的黑馬股。")
+        
+        rank_by = st.selectbox(
+            "選擇排序與篩選指標：",
+            ["最新融資餘額最高 (找融資最多的個股)", "最新單日融資增加最多 (找融資大增的個股)"],
+            index=0
+        )
+        
+        if st.button("🚀 開始掃描全市場融資排行", key="btn_run_margin_rank"):
+            with st.spinner("獲取全市場最新融資數據並進行排行分析中..."):
+                # 獲取融資日期 (自動回推最新交易日)
+                margin_data_all = {}
+                margin_date_str_all = ""
+                now_tw = datetime.now(timezone(timedelta(hours=8)))
+                if now_tw.hour < 19:
+                    current_date = now_tw - timedelta(days=1)
+                else:
+                    current_date = now_tw
+
+                attempts = 0
+                while attempts < 10:
+                    date_str = current_date.strftime("%Y%m%d")
+                    temp_margin = data_fetcher.fetch_all_margin(date_str)
+                    if temp_margin:
+                        margin_data_all = temp_margin
+                        margin_date_str_all = date_str
+                        break
+                    current_date -= timedelta(days=1)
+                    attempts += 1
+                
+                if margin_data_all:
+                    margin_list_all = []
+                    for code, item in margin_data_all.items():
+                        margin_list_all.append({
+                            "代號": code,
+                            "前資餘額(張)": int(item["prev"]),
+                            "今日融資餘額(張)": int(item["today"]),
+                            "今日融資變動(張)": int(item["change"])
+                        })
+                    
+                    df_margin_all = pd.DataFrame(margin_list_all)
+                    
+                    # 排序
+                    if "餘額最高" in rank_by:
+                        sort_col = "今日融資餘額(張)"
+                    else:
+                        sort_col = "今日融資變動(張)"
+                        
+                    # 取得前 50 筆
+                    top_margin_all = df_margin_all.sort_values(by=sort_col, ascending=False).head(50).reset_index(drop=True)
+                    top_margin_all.index = top_margin_all.index + 1  # 序號從 1 開始作為排名
+                    
+                    # 針對前 50 名動態快速映射股票中文名稱
+                    top_margin_all["股票名稱"] = top_margin_all["代號"].apply(lambda c: data_fetcher.fetch_stock_name_fast(c))
+                    
+                    # 重排欄位並顯示
+                    df_display = top_margin_all[["代號", "股票名稱", "今日融資餘額(張)", "今日融資變動(張)", "前資餘額(張)"]]
+                    
+                    st.success(f"掃描成功！資料日期：{margin_date_str_all}")
+                    st.dataframe(df_display, use_container_width=True)
+                else:
+                    st.error("無法取得全市場融資數據。")
