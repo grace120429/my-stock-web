@@ -191,10 +191,12 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 # ==================== 【分頁一：三大法人選股大數據】 ====================
 with tab1:
-    st.subheader("核心篩選與指標過濾")
-    
-    # 用 columns 將設定元件橫向排開，類似原 Tkinter 的排版
-    col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
+    # 加上這行，會自動幫裡面的元件畫上一個乾淨的圓角邊框與淺色卡片底色
+    with st.container(border=True):
+        st.subheader("核心篩選與指標過濾")
+        
+        # 用 columns 將設定元件橫向排開（注意：這幾行要往右縮排一格）
+        col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
     
     with col_cfg1:
         days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
