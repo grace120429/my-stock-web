@@ -53,7 +53,7 @@ def create_yf_session():
 # ==================== 網頁專用精美 HTML 除息行事曆渲染器 ====================
 def render_streamlit_calendar(year, month, events):
     """
-    利用純 HTML 渲染除息行事曆，支援瀏覽器原生 Tooltip 浮動提示
+    利用純 HTML 渲染除息行事曆，支援瀏覽器原生 Tooltip 浮動提示 (商用無Emoji精簡版)
     """
     import calendar
     cal = calendar.Calendar(calendar.SUNDAY)
@@ -76,8 +76,8 @@ def render_streamlit_calendar(year, month, events):
                 cell_style = "border: 1px solid #e6e9ef; height: 45px; text-align: center; vertical-align: middle; font-size: 14px;"
                 
                 if day_events:
-                    # 使用 HTML 實體 &#13; 實現 Tooltip 多行換行顯示
-                    tooltip_text = f"📅 {year}/{month:02d}/{day:02d} 除息預告：&#13;" + "&#13;".join([f"📌 {ev['code']} {ev['name']}: {ev['amount']}" for ev in day_events])
+                    # 使用 HTML 實體 &#13; 實現 Tooltip 多行換行顯示 (移除 Emoji，保持簡潔商用風格)
+                    tooltip_text = f"除息預告 ({year}/{month:02d}/{day:02d})：&#13;" + "&#13;".join([f"{ev['code']} {ev['name']}: {ev['amount']}" for ev in day_events])
                     row_cells.append(
                         f"<td style='{cell_style} background-color: #ffcccc; color: #cc0000; font-weight: bold; cursor: pointer;' "
                         f"title='{tooltip_text}'>{day}</td>"
@@ -115,10 +115,10 @@ def get_eps_from_stmt(stmt):
             return stmt.loc[idx]
     return None
 
-# ==================== 側邊欄網站人氣統計看板 ====================
-st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>📊 網站數據統計</h3>", unsafe_allow_html=True)
+# ==================== 側邊欄網站人氣統計看板 (商用無Emoji簡潔版) ====================
+st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>網站數據統計</h3>", unsafe_allow_html=True)
 
-# 雲端永久人氣計數器 (使用 hitscounter.dev 提供永久累積與更新，綁定您的專屬帳號)
+# 雲端永久人氣計數器 (使用 hitscounter.dev 提供永久累積與更新，網址經由 URL 編碼確保唯一性)
 visitor_badge_url = "https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fgrace120429%2Fmy-stock-web&label=Total%20Views&color=%23007bff"
 
 st.sidebar.markdown(
@@ -132,47 +132,47 @@ st.sidebar.markdown(
 
 st.sidebar.markdown(
     """
-    <div style='text-align: center; color: gray; font-size: 12px;'>
-        💡 提示：本計數器由雲端數據庫提供永久累計，每一次頁面載入皆會即時更新。
+    <div style='text-align: center; color: gray; font-size: 11px;'>
+        提示：本計數器由雲端數據庫提供永久累計，每一次頁面載入皆會即時更新。
     </div>
     """,
     unsafe_allow_html=True
 )
 
 # ==================== 頁首資訊 ====================
-st.title("🖥️ 台股三大法人選股工具 by Kelly (網頁版)")
+st.title("台股三大法人選股工具 by Kelly (網頁版)")
 
 # 載入即時台幣匯率與集保資料日期
 twd_str = data_fetcher.fetch_twd_data()
 st.info(f"{twd_str}")
 
-# ==================== 建立四大分頁 ====================
+# ==================== 建立四大分頁 (商用精簡版) ====================
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🔍 三大法人選股大數據", 
-    "📌 我的自選監控", 
-    "📊 主力券商進出", 
-    "📈 台灣熱門 ETF 配息專區"
+    "三大法人選股大數據", 
+    "我的自選監控", 
+    "主力券商進出", 
+    "台灣熱門 ETF 配息專區"
 ])
 
 # ==================== 【分頁一：三大法人選股大數據】 ====================
 with tab1:
-    st.subheader("🛠️ 核心篩選與指標過濾")
+    st.subheader("核心篩選與指標過濾")
     
     # 用 columns 將設定元件橫向排開，類似原 Tkinter 的排版
-    col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.3, 1.9])
+    col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
     
     with col_cfg1:
         days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
         
     with col_cfg2:
-        st.write("**核心籌碼、信用與基本面要素（勾選單項即可全市場排行篩選）：**")
+        st.write("核心籌碼與信用篩選 (多選，不依賴三大法人時可只勾融資)：")
         col_m1, col_m2, col_m3, col_m4, col_m5, col_m6, col_m7 = st.columns(7)
         f_active = col_m1.checkbox("外資", value=True)
         t_active = col_m2.checkbox("投信", value=False)
         d_active = col_m3.checkbox("自營商", value=True)
         m_active = col_m4.checkbox("融資 (資增)", value=True)
-        m_balance_active = col_m5.checkbox("融資 (餘額最高)", value=False)  # 融資最大量排行選項
-        eps_surge_active = col_m6.checkbox("EPS 暴增", value=False)  # 👈 核心修正：將「EPS暴增」升級移至左側核心欄位！
+        m_balance_active = col_m5.checkbox("融資 (餘額最高)", value=False)  # 全市場融資最大量排行選項
+        eps_surge_active = col_m6.checkbox("EPS 暴增", value=False)  # 核心選股
         b_active = col_m7.checkbox("分點券商", value=False)
         
         # 動態載入自訂分點下拉選單
@@ -180,7 +180,7 @@ with tab1:
         selected_broker_name = st.selectbox("選定主力分點：", list(brokers_dict.keys()), index=0)
 
     with col_cfg3:
-        st.write("**指標進階過濾：**")
+        st.write("指標進階過濾：")
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         filter_ma = col_f1.checkbox("日線多頭排列", value=True)
         filter_macd = col_f2.checkbox("日線 MACD金叉", value=True)
@@ -189,7 +189,7 @@ with tab1:
         filter_vol = st.checkbox("量能突破 (爆量 2x)", value=False)
 
     # 執行篩選
-    if st.button("🔍 開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
+    if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
         with st.spinner("正在進行大數據分析，請稍候..."):
             # 1. 抓取三大法人數據
             dfs, t86_dates = data_fetcher.get_recent_data(days_count=days_count)
@@ -271,11 +271,10 @@ with tab1:
                 filtered_summary = summary.copy()
                 filtered_summary['排序得分'] = 0.0
                 
-                # 安全阻攔機制 (只要有勾選其中一項即可執行，包含只勾 EPS 暴增)
+                # 安全阻攔機制
                 if not (f_active or t_active or d_active or m_active or m_balance_active or eps_surge_active or b_active):
-                    st.warning("請至少勾選一個核心選股要素指標！")
+                    st.warning("請至少勾選一個核心篩選指標！")
                 else:
-                    # 1. 核心籌碼加權分計算
                     if f_active:
                         filtered_summary = filtered_summary[filtered_summary['外資_張'] > 0]
                         filtered_summary['排序得分'] += filtered_summary['外資_張']
@@ -295,8 +294,7 @@ with tab1:
                         filtered_summary = filtered_summary[filtered_summary['分點_萬'] > 0]
                         filtered_summary['排序得分'] += filtered_summary['分點_萬'] / 10.0
                     
-                    # 👈 核心機制：如果「完全不勾三大法人與信用融資」，只勾選「EPS 暴增」進行獨立選股
-                    # 程式會直接以「市場法人交易量＋融資總量最大、最活絡的前 80 檔」做為基礎池，避開法人足跡，領先布局基本面爆發個股！
+                    # 核心選股：如果「完全不勾三大法人與信用融資」，只勾選「EPS 暴增」進行獨立選股
                     if eps_surge_active and not (f_active or t_active or d_active or m_active or m_balance_active or b_active):
                         filtered_summary['排序得分'] = (
                             filtered_summary[col_foreign].abs() / 1000 + 
@@ -334,7 +332,7 @@ with tab1:
                         # 智慧型提示初始化
                         is_code_etf = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
                         
-                        # 👈 智慧過濾：如果啟用了「EPS 暴增」核心選股，而個股是 ETF，直接淘汰跳過（省去下載財報時間）
+                        # 智慧過濾：如果啟用了「EPS 暴增」核心選股，而個股是 ETF，直接淘汰跳過（省去下載財報時間）
                         if eps_surge_active and is_code_etf:
                             continue
                         
@@ -344,7 +342,7 @@ with tab1:
                         try:
                             time.sleep(0.15)  # 禮貌防阻擋安全等待
                             
-                            # 無條件在此先一步建立 stock 對象 (解決在快取讀取時變數 undefined 崩潰)
+                            # 無條件建立 stock 對象 (解決在快取讀取時變數 undefined 崩潰)
                             stock = yf.Ticker(ticker, session=yf_session)
                             
                             # 使用 Session State 做為 K 線資料快取
@@ -359,7 +357,7 @@ with tab1:
                                 errors_log.append(f"{code}: 歷史數據不足")
                                 continue
                                 
-                            # 👈 核心修改：不論有沒有勾選過濾，只要是非 ETF 股票，一律下載並顯示真實的 EPS 數據！ [2]
+                            # 核心修改：不論有沒有勾選過濾，只要是非 ETF 股票，一律下載並顯示真實的 EPS 數據！ [2]
                             if not is_code_etf:
                                 try:
                                     q_stmt = stock.quarterly_income_stmt
@@ -376,7 +374,7 @@ with tab1:
                                         latest_q_eps_val = f"{round(latest_q_eps, 2)} 元"
                                         latest_a_eps_val = f"{round(latest_a_eps, 2)} 元"
                                         
-                                        # 👈 核心過濾：如果啟用了「EPS 暴增」核心選股，而個股「季 EPS <= 年 EPS」，則直接淘汰 [2]
+                                        # 核心過濾：如果啟用了「EPS 暴增」核心選股，而個股「季 EPS <= 年 EPS」，則直接淘汰 [2]
                                         if eps_surge_active and latest_q_eps <= latest_a_eps:
                                             continue
                                     else:
@@ -403,7 +401,7 @@ with tab1:
                                 continue
                                 
                             is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
-                            ma_status = "🟢 均線向上" if is_bullish else "🔴 整理/向下"
+                            ma_status = "均線向上" if is_bullish else "整理/向下"  # 商用版：移除表情符號
                             if filter_ma and not is_bullish:
                                 continue
                                 
@@ -411,11 +409,11 @@ with tab1:
                             vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
                             ma_status_display = f"{ma_status} ({vol_status_str})"
                             
-                            # MACD 計算
+                            # MACD 計算 (商用版：過濾掉表情符號)
                             latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
-                            macd_daily_status = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily)
+                            macd_daily_status = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                             
-                            if filter_macd and "🟢" not in macd_daily_status:
+                            if filter_macd and "MACD金叉" not in macd_daily_status and "多頭" not in macd_daily_status:
                                 continue
                                 
                             # 60分K MACD
@@ -428,7 +426,7 @@ with tab1:
                                     if not hist_60m.empty:
                                         st.session_state.yf_60m_cache[ticker] = hist_60m
                                 latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
-                                macd_60m_status = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m)
+                                macd_60m_status = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
                             except:
                                 macd_60m_status = "N/A"
                                 
@@ -438,23 +436,24 @@ with tab1:
                             prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
                             pct_change = ((price - prev_price) / prev_price) * 100
                             
+                            # 👈 核心重整：依照關聯性重新組合欄位順序 (代號 -> 名稱 -> 價格 -> EPS -> 營收 -> 三大法人 -> 融資與籌碼大戶 -> 技術指標)
                             final_rows.append({
                                 "代號": code,
                                 "股票名稱": name,
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
-                                "最新單季EPS": latest_q_eps_val,  # 👈 直接顯示：最新單季EPS
-                                "最新年度EPS": latest_a_eps_val,  # 👈 直接顯示：最新年度EPS
+                                "最新單季EPS": latest_q_eps_val,
+                                "最新年度EPS": latest_a_eps_val,
+                                "月營收YoY/MoM": helpers.format_rev_growth(rev_item),  # 👈 營收緊貼放在年度EPS後面
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
+                                "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),  # 👈 融資餘額移到自營金額後面
+                                "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),  # 👈 融資變動緊貼在餘額後面
+                                "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",  # 👈 大戶比例緊貼放在融資後面
                                 "均線狀態": ma_status_display,
                                 "日K_MACD": macd_daily_status,
                                 "60m_MACD": macd_60m_status,
-                                "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
-                                "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),  # 新增融資餘額欄位
-                                "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
-                                "月營收YoY/MoM": helpers.format_rev_growth(rev_item),
                                 "短期支壓(1M)": sr_1m,
                                 "中期支壓(6M)": sr_6m,
                                 "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
@@ -475,23 +474,23 @@ with tab1:
                             use_container_width=True
                         )
                     else:
-                        st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
+                        st.warning("無符合當前篩選與過濾條件之個個股，請放寬條件再試。")
                         if errors_log:
                             with st.expander("⚠️ 查看背景連線診斷報告"):
                                 st.write(errors_log[:10])
 
 # ==================== 【分頁二：我的自選監控】 ====================
 with tab2:
-    st.subheader("📌 觀察名單即時監控")
+    st.subheader("觀察名單即時監控")
     
     # 載入自選監控
     watchlist = storage.load_watchlist()
     
     col_w1, col_w2 = st.columns([1, 3])
     with col_w1:
-        st.write("**⚙️ 自選股管理**")
+        st.write("自選股管理")
         new_watchlist_code = st.text_input("輸入股票代號加入自選：", max_chars=6, key="add_w")
-        if st.button("➕ 加入自選清單"):
+        if st.button("加入自選清單"):  # 商用版：移除表情符號
             if new_watchlist_code:
                 new_watchlist_code = new_watchlist_code.strip()
                 if new_watchlist_code not in watchlist:
@@ -504,7 +503,7 @@ with tab2:
                     st.info(f"股票代號 {new_watchlist_code} 已存在於自選名單中。")
                     
         del_watchlist_code = st.text_input("輸入股票代號移除自選：", max_chars=6, key="del_w")
-        if st.button("❌ 移除自選項目", type="secondary"):
+        if st.button("移除自選項目", type="secondary"):  # 商用版：移除表情符號
             del_watchlist_code = del_watchlist_code.strip()
             if del_watchlist_code in watchlist:
                 watchlist.remove(del_watchlist_code)
@@ -516,17 +515,17 @@ with tab2:
                 st.warning(f"自選名單中找不到 {del_watchlist_code}。")
         
         st.write("---")
-        st.write("**📝 目前監控中的股票代號：**")
+        st.write("目前監控中的股票代號：")
         if watchlist:
             st.info(", ".join(watchlist))
         else:
             st.warning("目前監控清單為空。")
 
     with col_w2:
-        st.write("**📊 自選股雙週期趨勢與警示看板**")
+        st.write("自選股雙週期趨勢與警示看板")
         
         if watchlist:
-            if st.button("🔄 手動重新整理自選數據"):
+            if st.button("手動重新整理自選數據"):  # 商用版：移除表情符號
                 st.session_state.yf_cache.clear()
                 st.session_state.yf_60m_cache.clear()
                 st.success("快取已清除，正在重新抓取...")
@@ -569,7 +568,7 @@ with tab2:
                             errors_log_tab2.append(f"{code}: 歷史K線數據不足")
                             continue
                             
-                        # 👈 分頁二（自選監控）自動載入最新年度與單季 EPS 數據
+                        # 分頁二（自選監控）自動載入最新年度與單季 EPS 數據
                         if not is_code_etf_tab2:
                             try:
                                 try:
@@ -599,16 +598,16 @@ with tab2:
                         prev_price = hist['Close'].iloc[-2]
                         pct_change = ((price - prev_price) / prev_price) * 100
                         
-                        # MACD 與警示
+                        # MACD 與警示 (商用版：過濾掉表情符號)
                         latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
-                        macd_daily_status = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily)
+                        macd_daily_status = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                         
                         # 60m MACD
                         try:
                             stock_60m = yf.Ticker(ticker, session=yf_session_tab2)
                             hist_60m = stock_60m.history(interval="60m", period="1mo")
                             latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
-                            macd_60m_status = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m)
+                            macd_60m_status = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
                         except:
                             macd_60m_status = "N/A"
                             latest_osc_60m = None
@@ -616,13 +615,13 @@ with tab2:
                         is_daily_bear = (latest_osc_daily is not None and latest_osc_daily <= 0)
                         is_60m_bear = (latest_osc_60m is not None and latest_osc_60m <= 0)
                         if is_daily_bear and is_60m_bear:
-                            alert_str = "🚨 賣出警示 (MACD雙空)"
+                            alert_str = "賣出警示 (MACD雙空)"
                         elif is_daily_bear and not is_60m_bear:
-                            alert_str = "🔵 先驅起漲 (日空/短轉強)"
+                            alert_str = "先驅起漲 (日空/短轉強)"
                         elif not is_daily_bear and is_60m_bear:
-                            alert_str = "🟡 短線修正 (日多/短轉弱)"
+                            alert_str = "短線修正 (日多/短轉弱)"
                         else:
-                            alert_str = "🟢 趨勢強勢 (MACD雙多)"
+                            alert_str = "趨勢強勢 (MACD雙多)"
                         
                         # 自選股同步運算量能突破，並拼接進狀態欄
                         latest_vol = hist['Volume'].iloc[-1]
@@ -633,20 +632,21 @@ with tab2:
                             
                         sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
                         
+                        # 👈 核心重整：分頁二（自選監控）比照關聯性優化順序 (代號 -> 名稱 -> 價格 -> EPS -> 營收 -> 籌碼大戶 -> 技術指標)
                         w_rows.append({
                             "代號": code,
                             "股票名稱": name,
                             "現價": round(price, 1),
                             "漲跌幅(%)": round(pct_change, 2),
-                            "最新單季EPS": latest_q_eps_val_tab2,  # 新增自選股單季EPS
-                            "最新年度EPS": latest_a_eps_val_tab2,  # 新增自選股年度EPS
+                            "最新單季EPS": latest_q_eps_val_tab2,  # 👈 EPS 數據
+                            "最新年度EPS": latest_a_eps_val_tab2,  # 👈 EPS 數據
+                            "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),  # 👈 營收緊貼放在EPS後面
+                            "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",  # 👈 大戶比例緊貼放在營收後面
                             "日K_MACD": macd_daily_status,
                             "60分K_MACD": macd_60m_status,
                             "趨勢狀態": alert_str_display,
-                            "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
                             "短期支壓(1M)": sr_1m,
-                            "中期支壓(6M)": sr_6m,
-                            "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code))
+                            "中期支壓(6M)": sr_6m
                         })
                     except Exception as ex_tab2:
                         errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
@@ -661,18 +661,18 @@ with tab2:
                 with st.expander("⚠️ 查看自選背景診斷報告"):
                     st.write(errors_log_tab2)
         else:
-            st.info("💡 目前自選觀察名單為空。請在左側輸入股票代碼並點擊加入，系統將會自動為您監控趨勢！")
+            st.info("目前自選觀察名單為空。請在左側輸入股票代碼並點擊加入，系統將會自動為您監控趨勢！")
 
 # ==================== 【分頁三：主力券商進出】 ====================
 with tab3:
-    st.subheader("📊 特寫分點主力特定天數交易明細")
+    st.subheader("特寫分點主力特定天數交易明細")
     
     # 自訂分點管理介面
-    with st.expander("⚙️ 管理我的自訂券商分點"):
+    with st.expander("管理我的自訂券商分點"):  # 商用版：移除表情符號
         col_b1, col_b2 = st.columns(2)
         new_b_name = col_b1.text_input("分點名稱 (如: 凱基台北)：")
         new_b_code = col_b2.text_input("分點代號 (4碼，如: 9268)：")
-        if st.button("➕ 儲存新分點"):
+        if st.button("儲存新分點"):  # 商用版：移除表情符號
             if new_b_name and new_b_code:
                 brokers_dict[new_b_name] = new_b_code.lower()
                 storage.save_custom_brokers(brokers_dict)
@@ -684,7 +684,7 @@ with tab3:
     target_days = col_q2.selectbox("統計天數：", ["近1日", "近5日", "近10日", "近20日"], index=1)
     target_filter = col_q3.selectbox("過濾進出方向：", ["全部進出", "僅顯示買超", "僅顯示賣超"])
     
-    if st.button("🔍 開始查詢主力買賣超"):
+    if st.button("開始查詢主力買賣超"):  # 商用版：移除表情符號
         days_map = {"近1日": 1, "近5日": 5, "近10日": 10, "近20日": 20}
         days_param = days_map.get(target_days, 5)
         b_id = brokers_dict.get(target_broker)
@@ -704,7 +704,7 @@ with tab3:
                         "買進金額(萬)": item["buy"],
                         "賣出金額(萬)": item["sell"],
                         "淨買超(萬)": diff,
-                        "進出方向": "🟢 淨買超" if diff > 0 else "🔴 淨賣超"
+                        "進出方向": "淨買超" if diff > 0 else "淨賣超"  # 商用版：移除表情符號
                     })
                 if b_rows:
                     df_b = pd.DataFrame(b_rows).sort_values(by="淨買超(萬)", key=abs, ascending=False)
@@ -725,7 +725,7 @@ with tab4:
     if "etf_events" not in st.session_state:
         st.session_state.etf_events = {}
 
-    st.subheader("📈 熱門與主動式 ETF 動態息收與殖利率看板")
+    st.subheader("熱門與主動式 ETF 動態息收與殖利率看板")
     
     # 讀取 ETF 清單
     hot_etfs = storage.load_custom_etfs()
@@ -737,7 +737,7 @@ with tab4:
         col_e1, col_e2 = st.columns([1, 2])
         with col_e1:
             new_etf_code = st.text_input("新增自選 ETF (代碼)：", max_chars=6, key="add_etf_code")
-            if st.button("➕ 新增 ETF"):
+            if st.button("新增 ETF"):  # 商用版：移除表情符號
                 if new_etf_code:
                     new_etf_code = new_etf_code.upper().strip()
                     etf_name = data_fetcher.fetch_stock_name_fast(new_etf_code)
@@ -751,10 +751,10 @@ with tab4:
                         time.sleep(0.5)
                         st.rerun()
                     else:
-                        st.info(f"ℹ️ ETF {new_etf_code} 已經在您的清單中囉！")
+                        st.info(f"ETF {new_etf_code} 已經在您的清單中囉！")
                         
             del_etf_code = st.text_input("輸入要移除的 ETF 代碼：", max_chars=6, key="del_etf_code")
-            if st.button("❌ 刪除選中 ETF", type="secondary"):
+            if st.button("刪除選中 ETF", type="secondary"):  # 商用版：移除表情符號
                 if del_etf_code:
                     del_etf_code = del_etf_code.upper().strip()
                     if any(item[0] == del_etf_code for item in hot_etfs):
@@ -764,10 +764,10 @@ with tab4:
                         time.sleep(0.5)
                         st.rerun()
                     else:
-                        st.warning(f"⚠️ 在您的清單中找不到 ETF 代碼 {del_etf_code}，無法刪除。")
+                        st.warning(f"在您的清單中找不到 ETF 代碼 {del_etf_code}，無法刪除。")
                 
         with col_e2:
-            st.write("**最新預估配息與收益清單：**")
+            st.write("最新預估配息與收益清單：")
             upcoming_dict = data_fetcher.fetch_upcoming_dividends()
             etf_rows = []
             
@@ -789,7 +789,7 @@ with tab4:
                         "除息交易日": data["ex_date"],
                         "年度累計配息": data["current_year_sum"],
                         "預估年化殖利率": data["yield"],
-                        "除息提醒狀態": data["status"]
+                        "除息提醒狀態": data["status"].replace("🔔 ", "").replace("🔴 ", "").replace("⏳ ", "")  # 👈 移除表情
                     })
                     
                     # 收集除息日期事件至行事曆快取中
@@ -813,7 +813,7 @@ with tab4:
                 st.info("目前無 ETF 息收數據。")
 
     with col_main_right:
-        st.write("**📅 ETF 除息行事曆**")
+        st.write("📅 ETF 除息行事曆")
         
         # 建立與 Tkinter 一致的左右導航按鈕與月份標題
         col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
@@ -841,18 +841,18 @@ with tab4:
             st.session_state.etf_events
         )
         st.markdown(html_cal, unsafe_allow_html=True)
-        st.caption("💡 提示：滑鼠懸停在紅色的除息日期上，可觀看當天除息 ETF 與金額詳情！")
+        st.caption("提示：滑鼠懸停在紅色的除息日期上，可觀看當天除息 ETF 與金額詳情。")
 
     # 退休配息存錢筒
     st.write("---")
-    st.subheader("💰 我的股息退休存錢筒 (複利配息計算機)")
+    st.subheader("我的股息退休存錢筒 (複利配息計算機)")
     piggy_bank_data = storage.load_piggy_bank()
     
     col_p1, col_p2 = st.columns([1, 3])
     with col_p1:
         p_code = st.text_input("ETF 代號：", max_chars=6, key="pb_c")
         p_shares = st.number_input("持有張數：", min_value=0.1, step=0.5, format="%.1f")
-        if st.button("➕ 更新持股"):
+        if st.button("更新持股"):  # 商用版：移除表情符號
             if p_code:
                 p_code = p_code.upper().strip()
                 piggy_bank_data[p_code] = p_shares
@@ -862,7 +862,7 @@ with tab4:
                 st.rerun()
                 
         p_del = st.text_input("要移除的代號：", max_chars=6, key="pb_del")
-        if st.button("❌ 移除持股"):
+        if st.button("移除持股"):  # 商用版：移除表情符號
             p_del = p_del.upper().strip()
             if p_del in piggy_bank_data:
                 del piggy_bank_data[p_del]
@@ -872,7 +872,7 @@ with tab4:
                 st.rerun()
                 
     with col_p2:
-        st.write("**退休被動收入配息模擬清單：**")
+        st.write("退休被動收入配息模擬清單：")
         pb_rows = []
         total_market_value = 0.0
         total_annual_dividend = 0.0
@@ -917,12 +917,12 @@ with tab4:
         if pb_rows:
             st.dataframe(pd.DataFrame(pb_rows), use_container_width=True)
             
-            # 統計看板 (核心修正：動態顯示目前選定月份的實質配息收入)
+            # 統計看板 (商用版：移除表情符號，並直接顯示指定月份的實質配息收入)
             col_stat1, col_stat2, col_stat3 = st.columns(3)
-            col_stat1.metric("📊 總持股市值", f"{int(total_market_value):,} 元")
-            col_stat2.metric("💰 預估年領總股息", f"{int(total_annual_dividend):,} 元")
+            col_stat1.metric("總持股市值", f"{int(total_market_value):,} 元")
+            col_stat2.metric("預估年領總股息", f"{int(total_annual_dividend):,} 元")
             col_stat3.metric(
-                f"🚀 {st.session_state.cal_month}月份預估配息收入", 
+                f"{st.session_state.cal_month}月份預估配息收入", 
                 f"{int(total_selected_month_dividend):,} 元",
                 delta="該月份實際配息收入" if total_selected_month_dividend > 0 else "本月份無除息"
             )
