@@ -12,7 +12,7 @@ import storage
 import data_fetcher
 
 # ==================== 頁面基本設定 ====================
-st.set_page_config(layout="wide", page_title="台股三大法人選股工具 - 網頁版")
+st.set_page_config(layout="wide", page_title="台股三大法人飆股選股工具")
 
 # ==================== 網頁美化：隱藏頂部工具列與底部商標 ====================
 hide_streamlit_style = """
@@ -140,7 +140,7 @@ st.sidebar.markdown(
 )
 
 # ==================== 頁首資訊 ====================
-st.title("台股三大法人選股工具 by Kelly (網頁版)")
+st.title("台股三大法人飆股選股工具 by Kelly")
 
 # 載入即時台幣匯率與集保資料日期
 twd_str = data_fetcher.fetch_twd_data()
@@ -165,7 +165,7 @@ with tab1:
         days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
         
     with col_cfg2:
-        st.write("核心籌碼與信用篩選 (多選，不依賴三大法人時可只勾融資)：")
+        st.write("核心籌碼與信用篩選：")
         col_m1, col_m2, col_m3, col_m4, col_m5, col_m6, col_m7 = st.columns(7)
         f_active = col_m1.checkbox("外資", value=True)
         t_active = col_m2.checkbox("投信", value=False)
@@ -186,7 +186,7 @@ with tab1:
         filter_macd = col_f2.checkbox("日線 MACD金叉", value=True)
         filter_large = col_f3.checkbox("400張大戶週增持", value=True)
         filter_rev = col_f4.checkbox("月營收雙增", value=False)
-        filter_vol = st.checkbox("量能突破 (爆量 2x)", value=False)
+        filter_vol = st.checkbox("量能突破 (爆量 2x)", value=True)
 
     # 執行篩選
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
