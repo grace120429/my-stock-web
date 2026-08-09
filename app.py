@@ -453,7 +453,7 @@ with tab1:
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
                                 "最新單季EPS": latest_q_eps_val,
-                                "最新年度EPS": latest_a_eps_val,
+                                "去年年度EPS": latest_a_eps_val,
                                 "月營收YoY/MoM": helpers.format_rev_growth(rev_item),  # 👈 營收緊貼放在年度EPS後面
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
