@@ -349,7 +349,6 @@ with tab1:
                             "日K_MACD": macd_daily_status,
                             "60m_MACD": macd_60m_status,
                             "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
-                            "大戶週變動": f"{round(change_val, 2)}%" if change_val else "N/A",
                             "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
                             "月營收YoY/MoM": helpers.format_rev_growth(rev_item),
                             "短期支壓(1M)": sr_1m,
