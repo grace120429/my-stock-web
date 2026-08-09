@@ -164,12 +164,30 @@ def fetch_monthly_revenue():
 
 # ==================== 毫秒級個股/ETF 中文名稱搜尋 ====================
 def fetch_stock_name_fast(code):
-    url = f"https://query1.finance.yahoo.com/v1/finance/search?q={code}&lang=zh-Hant-TW&quotesCount=1"
+    """
+    精確爬取 Yahoo 股市台灣網頁標題，確保 100% 取得繁體中文名稱，避免雲端主機因海外 IP 讀取到英文
+    """
+    url = f"https://tw.stock.yahoo.com/quote/{code}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     try:
         res = unsafe_session.get(url, headers=headers, timeout=5, verify=False)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, "html.parser")
+            title = soup.find("title").text
+            if title:
+                # 範例："鴻準 (2354) - 股價" -> 取得括號前的 "鴻準"
+                name = title.split("(")[0].strip()
+                if name and "網頁搜尋" not in name and "Yahoo" not in name:
+                    return name
+    except Exception:
+        pass
+
+    # 備份原有 query1 Search API 機制
+    url_backup = f"https://query1.finance.yahoo.com/v1/finance/search?q={code}&lang=zh-Hant-TW&quotesCount=1"
+    try:
+        res = unsafe_session.get(url_backup, headers=headers, timeout=5, verify=False)
         if res.status_code == 200:
             data = res.json()
             quotes = data.get("quotes", [])
@@ -351,22 +369,17 @@ def fetch_upcoming_dividends():
         
     return upcoming_dict
 
-# ==================== 爬取 MoneyDJ ETF 第一階段「預估配息」自癒模組 (修正版) ====================
+# ==================== 爬取 MoneyDJ ETF 第一階段「預估配息」自癒模組 ====================
 def fetch_moneydj_pre_dividend(code):
-    """
-    爬取 MoneyDJ ETF 配息紀錄頁面，並透過「智慧表頭對齊演算法」精確獲取第一階段「預估配息金額」與除息日
-    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    # 自適應上櫃與上市後綴
     for suffix in [".TW", ".TWO"]:
         url = f"https://www.moneydj.com/ETF/X/Basic/Basic0005.xdjhtm?etfid={code}{suffix}"
         try:
             res = unsafe_session.get(url, headers=headers, timeout=5)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                # 優先尋找 MoneyDJ 除息表 ID
                 table = soup.find("table", id="ctl00_ctl00_MainContent_MainContent_gvTbl")
                 if not table:
                     table = soup.find("table", class_="datalist")
@@ -376,7 +389,6 @@ def fetch_moneydj_pre_dividend(code):
                     if not rows:
                         continue
                         
-                    # 1. 智慧型表頭定位：動態尋找「每單位分配金額」與「除息日」對應的精確欄位索引 (Index)
                     header_tds = rows[0].find_all(["th", "td"])
                     header_texts = [td.text.strip() for td in header_tds]
                     
@@ -385,8 +397,6 @@ def fetch_moneydj_pre_dividend(code):
                         if any(k in text for k in ["每單位分配金額", "分配金額", "配息金額", "配息(元)", "金額"]):
                             div_col_idx = idx
                             break
-                    
-                    # 備份安全機制
                     if div_col_idx == -1:
                         div_col_idx = 5
                         
@@ -398,7 +408,6 @@ def fetch_moneydj_pre_dividend(code):
                     if ex_date_idx == -1:
                         ex_date_idx = 1
                         
-                    # 2. 解析最新一期（即排除表頭後的第一個有效行）資料
                     for row in rows[1:]:
                         tds = [td.text.strip() for td in row.find_all("td")]
                         if len(tds) > max(ex_date_idx, div_col_idx):
@@ -414,11 +423,8 @@ def fetch_moneydj_pre_dividend(code):
             continue
     return None, None
 
-# ==================== ETF 配息與當月配息運算 (整合 MoneyDJ 智慧對齊) ====================
+# ==================== ETF 配息與當月配息運算 ====================
 def fetch_etf_dividend_details(code, upcoming_dict):
-    """
-    獲取 ETF 最新單期配息資訊，並主動以 MoneyDJ 第一階段預估數據覆蓋未公佈的官方空值
-    """
     ticker_tw = f"{code}.TW"
     try:
         stock = yf.Ticker(ticker_tw, session=unsafe_session)
@@ -436,18 +442,15 @@ def fetch_etf_dividend_details(code, upcoming_dict):
         
         divs = hist['Dividends'][hist['Dividends'] > 0]
         
-        # --- 核心優化：主動前往 MoneyDJ 獲取第一階段「預估配息」以防官方 OpenAPI 的滯後空值 ---
         dj_ex_date_str, dj_amount = fetch_moneydj_pre_dividend(code)
         if dj_ex_date_str and dj_amount and dj_amount > 0:
             try:
                 dj_ex_date = datetime.strptime(dj_ex_date_str, "%Y-%m-%d").date()
                 upcoming_item = upcoming_dict.get(code)
                 if upcoming_item:
-                    # 如果官方已登錄除息日，但金額尚未在第二階段確定（為 0），則使用 MoneyDJ 預估金額覆蓋之
                     if upcoming_item["amount"] == 0.0:
                         upcoming_item["amount"] = dj_amount
                 else:
-                    # 如果官方尚未登錄此日程，且除息日在未來，則自動建立臨時預定除息事件
                     now_date = datetime.now(timezone(timedelta(hours=8))).date()
                     if dj_ex_date >= now_date:
                         upcoming_dict[code] = {
@@ -487,7 +490,6 @@ def fetch_etf_dividend_details(code, upcoming_dict):
         latest_div_date = divs_list[-1][0]
         latest_div_value = divs_list[-1][1]
         
-        # 1 年內累計配息次數
         one_year_ago = latest_div_date - timedelta(days=365)
         past_year_divs = [val for dt, val in divs_list if dt >= one_year_ago]
         div_count = len(past_year_divs)
@@ -503,12 +505,10 @@ def fetch_etf_dividend_details(code, upcoming_dict):
         else:
             frequency = f"不定期 ({div_count}次/年)"
             
-        # 統計該年度 (西元 2026) 的累計配息
         current_year = datetime.now(timezone(timedelta(hours=8))).year
         current_year_divs = [val for dt, val in divs_list if dt.year == current_year]
         current_year_sum_val = sum(current_year_divs)
         
-        # 計算估算年化殖利率
         est_yield = (current_year_sum_val / price) * 100 if price > 0 else 0.0
         
         now_date = datetime.now(timezone(timedelta(hours=8))).date()
@@ -541,9 +541,6 @@ def fetch_etf_dividend_details(code, upcoming_dict):
 
 # ==================== 主力券商特定統計天數交易資料抓取 ====================
 def fetch_broker_net_buys(broker_id, days):
-    """
-    抓取指定券商分點於指定天數內的個股淨買賣超與交易量數據 (金額以萬元為單位)
-    """
     broker_id = str(broker_id).lower()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -590,7 +587,6 @@ def fetch_broker_net_buys(broker_id, days):
                             sell_val = float(tds[2].text.strip().replace(',', ''))
                             diff_val = float(tds[3].text.strip().replace(',', ''))
                             
-                            # 除以 10.0 將元換算為「萬元」並取小數後一位
                             buy_wan = round(buy_val / 10.0, 1)
                             sell_wan = round(sell_val / 10.0, 1)
                             diff_wan = round(diff_val / 10.0, 1)
