@@ -295,10 +295,14 @@ with tab1:
                             if not rev_item or rev_item.get("yoy", 0) <= 0 or rev_item.get("mom", 0) <= 0:
                                 continue
                         
+                        # 建立快取之外的暫存變數
+                        latest_q_eps_val = "N/A"
+                        latest_a_eps_val = "N/A"
+                        
                         try:
                             time.sleep(0.15)  # 禮貌防阻擋安全等待
                             
-                            # 👈 核心修正：無條件在此先一步建立 stock 對象 (解決在快取讀取時變數 undefined 崩潰)
+                            # 無條件在此先一步建立 stock 對象 (解決在快取讀取時變數 undefined 崩潰)
                             stock = yf.Ticker(ticker, session=yf_session)
                             
                             # 使用 Session State 做為 K 線資料快取
@@ -313,7 +317,7 @@ with tab1:
                                 errors_log.append(f"{code}: 歷史數據不足")
                                 continue
                                 
-                            # 👈 新增「EPS 暴增」獨立面財務比對 (此時變數 stock 百分之百已被成功宣告)
+                            # 👈 新增「EPS 暴增」獨立面財務比對與欄位數值提取
                             if filter_eps_surge:
                                 try:
                                     q_stmt = stock.quarterly_income_stmt
@@ -328,6 +332,10 @@ with tab1:
                                     latest_a_eps = a_eps_series.iloc[0]
                                     if pd.isna(latest_q_eps) or pd.isna(latest_a_eps) or latest_q_eps <= latest_a_eps:
                                         continue  # 不符合 季 EPS > 年 EPS，淘汰
+                                    
+                                    # 下載成功且符合條件，記錄下來秀在表格中
+                                    latest_q_eps_val = f"{round(latest_q_eps, 2)} 元"
+                                    latest_a_eps_val = f"{round(latest_a_eps, 2)} 元"
                                 else:
                                     continue  # 缺值，淘汰
                                 
@@ -388,6 +396,8 @@ with tab1:
                                 "股票名稱": name,
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
+                                "最新單季EPS": latest_q_eps_val,  # 👈 新增：單季EPS數據顯示
+                                "最新年度EPS": latest_a_eps_val,  # 👈 新增：年度EPS數據顯示
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
