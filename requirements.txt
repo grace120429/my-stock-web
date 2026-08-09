@@ -5,3 +5,4 @@ requests
 beautifulsoup4
 urllib3
 ttkbootstrap
+streamlit-local-storage
