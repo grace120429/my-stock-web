@@ -709,7 +709,7 @@ with tab4:
                         except:
                             pass
             if etf_rows:
-                st.dataframe(st.DataFrame(etf_rows), use_container_width=True)
+                st.dataframe(pd.DataFrame(etf_rows), use_container_width=True)  # 👈 修正 st.DataFrame -> pd.DataFrame 完畢！
             else:
                 st.info("目前無 ETF 息收數據。")
 
@@ -803,7 +803,7 @@ with tab4:
                 except:
                     pass
                     
-                # 比對是否與日曆顯示的年月份相同
+                # 比對是否與日曆顯示的年月份相同 (例如切換到 2026/08 則動態計算 8 月息收)
                 if ex_month == st.session_state.cal_month and ex_year == st.session_state.cal_year:
                     total_selected_month_dividend += shares * 1000 * latest_div_value
                 
