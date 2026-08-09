@@ -118,8 +118,8 @@ def get_eps_from_stmt(stmt):
 # ==================== 側邊欄網站人氣統計看板 ====================
 st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>📊 網站數據統計</h3>", unsafe_allow_html=True)
 
-# 雲端永久人氣計數器 (綁定 grace120429 的 GitHub 專案，確保全球唯一且永不消失)
-visitor_badge_url = "https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Fgrace120429%2Fmy-stock-web&count_bg=%23007bff&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=Total%20Views&edge_flat=false"
+# 👈 核心修正：使用 hitscounter.dev 雲端接口代替已關閉的 seeyoufarm，完美恢復瀏覽量統計 (綁定 grace120429 確保全球唯一累計)
+visitor_badge_url = "https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fgrace120429%2Fmy-stock-web&label=Total%20Views&color=%23007bff"
 
 st.sidebar.markdown(
     f"""
@@ -326,11 +326,11 @@ with tab1:
                             latest_q_eps_val = "ETF無EPS"
                             latest_a_eps_val = "ETF無EPS"
                         else:
-                            latest_q_eps_val = "未啟用過濾"
-                            latest_a_eps_val = "未啟用過濾"
+                            latest_q_eps_val = "N/A"
+                            latest_a_eps_val = "N/A"
                         
                         try:
-                            # 智慧優化：如果勾選了 EPS 暴增，但當下個股是 ETF，直接淘汰跳過（省去下載財報時間）
+                            # 智慧優化：如果勾選了 EPS 暴增過濾，但當下個股是 ETF，直接淘汰跳過（省去下載財報時間）
                             if filter_eps_surge and is_code_etf:
                                 continue
                             
@@ -351,8 +351,8 @@ with tab1:
                                 errors_log.append(f"{code}: 歷史數據不足")
                                 continue
                                 
-                            # 新增「EPS 暴增」獨立面財務比對與欄位數值提取
-                            if filter_eps_surge and not is_code_etf:
+                            # 👈 核心修改：無論是否勾選過濾，只要是非 ETF 股票，一律下載並顯示最新單季與年度 EPS
+                            if not is_code_etf:
                                 try:
                                     q_stmt = stock.quarterly_income_stmt
                                     a_stmt = stock.income_stmt
@@ -364,14 +364,19 @@ with tab1:
                                 if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                     latest_q_eps = q_eps_series.iloc[0]
                                     latest_a_eps = a_eps_series.iloc[0]
-                                    if pd.isna(latest_q_eps) or pd.isna(latest_a_eps) or latest_q_eps <= latest_a_eps:
-                                        continue  # 不符合 季 EPS > 年 EPS，淘汰
-                                    
-                                    # 下載成功且符合條件，記錄下來秀在表格中
-                                    latest_q_eps_val = f"{round(latest_q_eps, 2)} 元"
-                                    latest_a_eps_val = f"{round(latest_a_eps, 2)} 元"
+                                    if pd.notna(latest_q_eps) and pd.notna(latest_a_eps):
+                                        latest_q_eps_val = f"{round(latest_q_eps, 2)} 元"
+                                        latest_a_eps_val = f"{round(latest_a_eps, 2)} 元"
+                                        
+                                        # 如果勾選了 EPS 暴增過濾，但此時個股「季 EPS <= 年 EPS」，則淘汰不加入表格 [2]
+                                        if filter_eps_surge and latest_q_eps <= latest_a_eps:
+                                            continue
+                                    else:
+                                        if filter_eps_surge:
+                                            continue  # 數據缺值且啟用了過濾，淘汰
                                 else:
-                                    continue  # 缺值，淘汰
+                                    if filter_eps_surge:
+                                        continue  # 財報無EPS資訊且啟用了過濾，淘汰
                                 
                             # 計算均線
                             hist['MA5'] = hist['Close'].rolling(5).mean()
@@ -430,8 +435,8 @@ with tab1:
                                 "股票名稱": name,
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
-                                "最新單季EPS": latest_q_eps_val,  # 新增：單季EPS數據顯示
-                                "最新年度EPS": latest_a_eps_val,  # 新增：年度EPS數據顯示
+                                "最新單季EPS": latest_q_eps_val,  # 👈 更新：無條件載入顯示最新單季EPS數值
+                                "最新年度EPS": latest_a_eps_val,  # 👈 更新：無條件載入顯示最新年度EPS數值
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
