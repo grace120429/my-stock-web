@@ -77,6 +77,10 @@ if "yf_cache" not in st.session_state:
 if "yf_60m_cache" not in st.session_state:
     st.session_state.yf_60m_cache = {}
 
+# 初始化篩選結果記憶體，避免勾選時表格消失
+if "tab1_results" not in st.session_state:
+    st.session_state.tab1_results = None
+
 # ==================== 100% 執行緒安全防阻擋連線產生器 ====================
 def create_yf_session():
     """
@@ -264,13 +268,14 @@ with tab1:
         filter_rev = col_f3.checkbox("月營收雙增", value=False)
         filter_vol = st.checkbox("量能突破 (爆量 2x)", value=True)
 
-    # 執行篩選
+    # 執行篩選按鈕
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
         with st.spinner("正在進行大數據分析，請稍候..."):
             # 1. 抓取三大法人數據
             dfs, t86_dates = data_fetcher.get_recent_data(days_count=days_count)
             if not dfs:
                 st.error("無法自證交所取得資料。")
+                st.session_state.tab1_results = None
             else:
                 raw_data = pd.concat(dfs, ignore_index=True)
                 
@@ -350,6 +355,7 @@ with tab1:
                 # 安全阻攔機制
                 if not (f_active or t_active or d_active or m_active or m_balance_active or eps_surge_active or b_active):
                     st.warning("請至少勾選一個核心篩選指標！")
+                    st.session_state.tab1_results = None
                 else:
                     if f_active:
                         filtered_summary = filtered_summary[filtered_summary['外資_張'] > 0]
@@ -384,7 +390,6 @@ with tab1:
                     
                     # 逐檔 analysis 多週期與技術面指標
                     final_rows = []
-                    errors_log = []  # 收集下載錯誤用
                     
                     # 建立安全獨立的 yf_session
                     yf_session = create_yf_session()
@@ -425,7 +430,6 @@ with tab1:
                                     st.session_state.yf_cache[ticker] = hist
                             
                             if hist.empty or len(hist) < 20:
-                                errors_log.append(f"{code}: 歷史數據不足")
                                 continue
                                 
                             # 核心修改：不論有沒有勾選過濾，只要是非 ETF 股票，一律下載並顯示真實的 EPS 數據！
@@ -545,21 +549,21 @@ with tab1:
                             prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
                             pct_change = ((price - prev_price) / prev_price) * 100
                             
-                            # 👈 核心重整：依照關聯性重新組合欄位順序 (代號 -> 名稱 -> 價格 -> EPS -> 營收 -> 三大法人 -> 融資與籌碼大戶 -> 技術指標)
+                            # 👈 核心重整：依照關聯性重新組合欄位順序
                             final_rows.append({
                                 "代號": code,
                                 "股票名稱": name,
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
                                 "最新單季EPS": latest_q_eps_val,
-                                "去年年度EPS": latest_a_eps_val,  # 👈 修正為去年年度EPS
-                                "月營收YoY/MoM": helpers.format_rev_growth(rev_item),  # 👈 營收緊貼放在年度EPS後面
+                                "去年年度EPS": latest_a_eps_val,
+                                "月營收YoY/MoM": helpers.format_rev_growth(rev_item),
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
-                                "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),  # 👈 融資餘額移到自營金額後面
-                                "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),  # 👈 融資變動緊貼在餘額後面
-                                "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",  # 👈 大戶比例緊貼放在融資後面
+                                "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),
+                                "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
+                                "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
                                 "均線狀態": ma_status_display,
                                 "日K_MACD": macd_daily_status,
                                 "60m_MACD": macd_60m_status,
@@ -567,50 +571,56 @@ with tab1:
                                 "中期支壓(6M)": sr_6m,
                                 "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
                             })
-                        except Exception as ex:
-                            errors_log.append(f"{code}: {str(ex)}")
+                        except Exception:
                             continue
                             
-                    if final_rows:
-                        df_res = pd.DataFrame(final_rows)
-                        st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：您可以直接在下方表格最左側進行多選，將選中的股票一鍵加入自選股。)")
-                        
-                        # 修正這裡：將 selection_mode 改為標準官方的 "multi-row"（使用減號）
-                        event = st.dataframe(
-                            df_res, 
-                            column_config={
-                                "K線圖網址": st.column_config.LinkColumn("看日K線圖", display_text="開啟奇摩股市")
-                            },
-                            use_container_width=True,
-                            on_select="rerun",
-                            selection_mode="multi-row"
-                        )
-                        
-                        # 偵測使用者選取的行數
-                        selected_rows = event.selection.rows
-                        if selected_rows:
-                            selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
-                            st.write(f"目前已選取： {', '.join(selected_codes)}")
-                            if st.button(f"📥 將這 {len(selected_codes)} 檔股票加入自選股", type="primary"):
-                                # 讀取當前 Local Watchlist
-                                current_watchlist = get_local_watchlist()
-                                added_count = 0
-                                for code in selected_codes:
-                                    if code not in current_watchlist:
-                                        current_watchlist.append(code)
-                                        added_count += 1
-                                if added_count > 0:
-                                    save_local_watchlist(current_watchlist)
-                                    st.success(f"已成功加入 {added_count} 檔股票至您的專屬自選股！")
-                                    time.sleep(0.8)
-                                    st.rerun()
-                                else:
-                                    st.info("您選取的股票早已在自選股清單中囉！")
+                if final_rows:
+                    # 將成功篩選出的名單寫入記憶體中
+                    st.session_state.tab1_results = final_rows
+                else:
+                    st.session_state.tab1_results = []
+                    st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
+
+    # ==================== 關鍵修改：將表格渲染抽到「按鈕條件之外」 ====================
+    if st.session_state.tab1_results is not None:
+        if len(st.session_state.tab1_results) > 0:
+            df_res = pd.DataFrame(st.session_state.tab1_results)
+            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：您可以直接在下方表格最左側進行多選，將選中的股票一鍵加入自選股。)")
+            
+            # 使用正確的官方標準 "multi-row" 
+            event = st.dataframe(
+                df_res, 
+                column_config={
+                    "K線圖網址": st.column_config.LinkColumn("看日K線圖", display_text="開啟奇摩股市")
+                },
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="multi-row",
+                key="df_res_table_stable"  # 給予表格固定 Key，確保多選重新整理時狀態穩定
+            )
+            
+            # 偵測並讀取使用者選取的行數
+            selected_rows = event.selection.rows
+            if selected_rows:
+                selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
+                st.write(f"目前已選取： {', '.join(selected_codes)}")
+                if st.button(f"📥 將這 {len(selected_codes)} 檔股票加入自選股", type="primary", key="btn_add_selected_stable"):
+                    # 讀取當前 Local Watchlist
+                    current_watchlist = get_local_watchlist()
+                    added_count = 0
+                    for code in selected_codes:
+                        if code not in current_watchlist:
+                            current_watchlist.append(code)
+                            added_count += 1
+                    if added_count > 0:
+                        save_local_watchlist(current_watchlist)
+                        st.success(f"已成功加入 {added_count} 檔股票至您的專屬自選股！")
+                        time.sleep(0.8)
+                        st.rerun()
                     else:
-                        st.warning("無符合當前篩選與過濾條件之個個股，請放寬條件再試。")
-                        if errors_log:
-                            with st.expander("⚠️ 查看背景連線診斷報告"):
-                                st.write(errors_log[:10])
+                        st.info("您選取的股票早已在自選股清單中囉！")
+        else:
+            st.warning("查無符合過濾條件之個股。")
 
 # ==================== 【分頁二：我的自選監控】 ====================
 with tab2:
