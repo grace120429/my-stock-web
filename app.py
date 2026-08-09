@@ -147,7 +147,7 @@ with tab1:
         t_active = col_m2.checkbox("投信", value=False)
         d_active = col_m3.checkbox("自營商", value=True)
         m_active = col_m4.checkbox("融資 (資增)", value=True)
-        m_balance_active = col_m5.checkbox("融資 (餘額最高)", value=False)  # 👈 新增：全市場融資最大量排行選項
+        m_balance_active = col_m5.checkbox("融資 (餘額最高)", value=False)  # 全市場融資最大量排行選項
         b_active = col_m6.checkbox("分點券商", value=False)
         
         # 動態載入自訂分點下拉選單
@@ -161,7 +161,7 @@ with tab1:
         filter_macd = col_f2.checkbox("日線 MACD金叉", value=True)
         filter_large = col_f3.checkbox("400張大戶週增持", value=True)
         filter_rev = col_f4.checkbox("月營收雙增", value=False)
-        filter_eps_surge = col_f5.checkbox("EPS 暴增 (季 > 年)", value=False)  # 👈 新增：EPS獨立面進階過濾
+        filter_eps_surge = col_f5.checkbox("EPS 暴增 (季 > 年)", value=False)  # EPS獨立面進階過濾
         filter_vol = st.checkbox("量能突破 (爆量 2x)", value=False)
 
     # 執行篩選
@@ -241,7 +241,7 @@ with tab1:
                 summary['投信_張'] = summary[col_trust] / 1000 if col_trust else 0
                 summary['自營_張'] = summary[col_dealer] / 1000 if col_dealer else 0
                 summary['融資_張'] = summary['證券代號'].apply(lambda c: margin_data.get(c, {}).get("change", 0.0))
-                summary['融資_餘額'] = summary['證券代號'].apply(lambda c: margin_data.get(c, {}).get("today", 0.0))  # 👈 映射融資總餘額
+                summary['融資_餘額'] = summary['證券代號'].apply(lambda c: margin_data.get(c, {}).get("today", 0.0))  # 映射融資總餘額
                 summary['分點_萬'] = summary['證券代號'].apply(lambda c: tab1_broker_data.get(c, {}).get("diff", 0.0) if b_active else 0.0)
                 
                 filtered_summary = summary.copy()
@@ -298,11 +298,13 @@ with tab1:
                         try:
                             time.sleep(0.15)  # 禮貌防阻擋安全等待
                             
+                            # 👈 核心修正：無條件在此先一步建立 stock 對象 (解決在快取讀取時變數 undefined 崩潰)
+                            stock = yf.Ticker(ticker, session=yf_session)
+                            
                             # 使用 Session State 做為 K 線資料快取
                             if ticker in st.session_state.yf_cache:
                                 hist = st.session_state.yf_cache[ticker]
                             else:
-                                stock = yf.Ticker(ticker, session=yf_session)
                                 hist = stock.history(period="6mo")
                                 if not hist.empty and len(hist) >= 20:
                                     st.session_state.yf_cache[ticker] = hist
@@ -311,7 +313,7 @@ with tab1:
                                 errors_log.append(f"{code}: 歷史數據不足")
                                 continue
                                 
-                            # 👈 新增「EPS 暴增」獨立面財務比對
+                            # 👈 新增「EPS 暴增」獨立面財務比對 (此時變數 stock 百分之百已被成功宣告)
                             if filter_eps_surge:
                                 try:
                                     q_stmt = stock.quarterly_income_stmt
@@ -393,7 +395,7 @@ with tab1:
                                 "日K_MACD": macd_daily_status,
                                 "60m_MACD": macd_60m_status,
                                 "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
-                                "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),  # 👈 新增融資餘額欄位
+                                "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),  # 新增融資餘額欄位
                                 "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
                                 "月營收YoY/MoM": helpers.format_rev_growth(rev_item),
                                 "短期支壓(1M)": sr_1m,
@@ -709,7 +711,7 @@ with tab4:
                         except:
                             pass
             if etf_rows:
-                st.dataframe(pd.DataFrame(etf_rows), use_container_width=True)  # 👈 修正 st.DataFrame -> pd.DataFrame 完畢！
+                st.dataframe(pd.DataFrame(etf_rows), use_container_width=True)
             else:
                 st.info("目前無 ETF 息收數據。")
 
@@ -803,7 +805,7 @@ with tab4:
                 except:
                     pass
                     
-                # 比對是否與日曆顯示的年月份相同 (例如切換到 2026/08 則動態計算 8 月息收)
+                # 比對是否與日曆顯示的年月份相同
                 if ex_month == st.session_state.cal_month and ex_year == st.session_state.cal_year:
                     total_selected_month_dividend += shares * 1000 * latest_div_value
                 
