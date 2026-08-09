@@ -613,7 +613,6 @@ with tab1:
                             continue
                             
                 if final_rows:
-                    # 將成功篩選出的名單寫入記憶體中
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
@@ -728,7 +727,7 @@ with tab2:
             # 建立線程安全獨立 Session
             yf_session_tab2 = create_yf_session()
             
-            with st.spinner("正在分析自選股趨勢與支撐壓力點，請慢候..."):
+            with st.spinner("正在分析自選股趨勢與支撐壓力點，請稍候..."):
                 revenue_data = data_fetcher.fetch_monthly_revenue()
                 tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
                 tdcc_ratios, tdcc_changes = {}, {}
@@ -1229,6 +1228,27 @@ with tab5:
         # 預設後台管理密碼：admin888
         if admin_pwd == "admin888":
             st.success("身分驗證成功！已開啟管理權限。")
+            
+            # 📢 1. 新增：管理者公告編輯面板 📢
+            st.write("### 📢 編輯側邊欄公告")
+            current_ann = load_announcement()
+            new_ann_text = st.text_area(
+                "請輸入公告內容（支援多行輸入，可用來發布每日精選標的等）：",
+                value=current_ann.get("content", ""),
+                height=150,
+                help="儲存後，所有造訪本網頁的人都會立刻在側邊欄看到此公告內容。"
+            )
+            if st.button("儲存並發布公告", type="primary", key="save_ann_btn_tab5"):
+                updated_ann = {
+                    "content": new_ann_text.strip(),
+                    "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+                }
+                save_announcement(updated_ann)
+                st.success("公告已成功儲存並同步發布至側邊欄！")
+                time.sleep(0.5)
+                st.rerun()
+                
+            st.write("---")
             if not comments:
                 st.info("目前沒有留言可供管理。")
             else:
