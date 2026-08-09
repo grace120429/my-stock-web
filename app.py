@@ -14,6 +14,19 @@ import data_fetcher
 # ==================== 頁面基本設定 ====================
 st.set_page_config(layout="wide", page_title="台股三大法人選股工具 - 網頁版")
 
+# ==================== 網頁美化：隱藏頂部工具列與底部商標 ====================
+hide_streamlit_style = """
+            <style>
+            /* 隱藏頂部黑條、編輯按鈕與 GitHub 貓咪圖示 */
+            header {visibility: hidden;}
+            /* 隱藏 Streamlit 的主選單按鈕 */
+            #MainMenu {visibility: hidden;}
+            /* 隱藏網頁最下方的 Made with Streamlit 商標 */
+            footer {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
 # 初始化 yfinance 快取 (在 Session State 中，避免網頁重新整理時重複下載)
 if "yf_cache" not in st.session_state:
     st.session_state.yf_cache = {}
