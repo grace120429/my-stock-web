@@ -140,7 +140,7 @@ def get_eps_from_stmt(stmt):
 
 def get_quarter_str(date_obj):
     """
-    將財報日期轉換為季度標記字串，例如 2025Q3 [2]
+    將財報日期轉換為季度標記字串，例如 2025Q3
     """
     try:
         dt = pd.to_datetime(date_obj)
@@ -399,11 +399,11 @@ with tab1:
                                 if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                     latest_q_eps = q_eps_series.iloc[0]
                                     
-                                    # 計算最新單季所在的季度標記 (例如 2025Q3) [2]
+                                    # 計算最新單季所在的季度標記 (例如 2025Q3)
                                     q_date = q_eps_series.index[0]
                                     q_str = get_quarter_str(q_date)
                                     
-                                    # 抓取「去年年度EPS」（例如當前為 2026 年，則主動抓取並顯示 2025 年）[2]
+                                    # 抓取「去年年度EPS」（例如當前為 2026 年，則主動抓取並顯示 2025 年）
                                     target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
                                     a_eps_val = None
                                     a_eps_year = None
@@ -510,7 +510,7 @@ with tab1:
                                 "收盤價": round(price, 1),
                                 "漲跌幅(%)": round(pct_change, 2),
                                 "最新單季EPS": latest_q_eps_val,
-                                "去年年度EPS": latest_a_eps_val,  # 👈 修正為去年年度EPS [2]
+                                "去年年度EPS": latest_a_eps_val,  # 👈 修正為去年年度EPS
                                 "月營收YoY/MoM": helpers.format_rev_growth(rev_item),  # 👈 營收緊貼放在年度EPS後面
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
@@ -649,11 +649,11 @@ with tab2:
                                 if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                     latest_q_eps = q_eps_series.iloc[0]
                                     
-                                    # 計算最新單季所在的季度標記 (例如 2025Q3) [2]
+                                    # 計算最新單季所在的季度標記 (例如 2025Q3)
                                     q_date = q_eps_series.index[0]
                                     q_str = get_quarter_str(q_date)
                                     
-                                    # 抓取「去年年度EPS」 (例如當前為 2026 年，則主動抓取並顯示 2025 年) [2]
+                                    # 抓取「去年年度EPS」 (例如當前為 2026 年，則主動抓取並顯示 2025 年)
                                     target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
                                     a_eps_val = None
                                     a_eps_year = None
@@ -743,7 +743,7 @@ with tab2:
                             "現價": round(price, 1),
                             "漲跌幅(%)": round(pct_change, 2),
                             "最新單季EPS": latest_q_eps_val_tab2,  # 👈 EPS 數據
-                            "去年年度EPS": latest_a_eps_val_tab2,  # 👈 修正為去年年度EPS [2]
+                            "去年年度EPS": latest_a_eps_val_tab2,  # 👈 修正為去年年度EPS
                             "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),  # 👈 營收緊貼放在EPS後面
                             "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",  # 👈 大戶比例緊貼放在營收後面
                             "日K_MACD": macd_daily_status,
@@ -1045,7 +1045,7 @@ with tab5:
         col_author, col_submit = st.columns([1, 3])
         author_name = col_author.text_input("您的稱呼：", max_chars=10, value="匿名讀者")
         comment_content = st.text_area("留言內容：", max_chars=200, placeholder="歡迎在這裡分享您的想法或回饋...")
-        submitted = st.form_submit_with_button("送出留言")
+        submitted = st.form_submit_button("送出留言")  # 👈 修正此處的函式名稱，排除 AttributeError 報錯
         
         if submitted:
             if not comment_content.strip():
@@ -1056,7 +1056,9 @@ with tab5:
                     "id": int(time.time() * 1000),  # 以毫秒級時間戳記做為唯一識別 ID
                     "time": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
                     "author": author_name.strip() if author_name.strip() else "匿名讀者",
-                    "content": comment_content.strip()
+                    "content": comment_content.strip(),
+                    "reply": "",       # 預留回復欄位
+                    "reply_time": ""   # 預留回復時間欄位
                 }
                 comments.append(new_comment)
                 save_comments(comments)
@@ -1072,18 +1074,30 @@ with tab5:
     else:
         # 倒序顯示，最新發表的留言置頂
         for msg in reversed(comments):
+            # 判斷是否有管理者回覆
+            reply_html = ""
+            if "reply" in msg and msg["reply"]:
+                reply_time_str = f" <span style='color: gray; font-size: 11px; margin-left: 10px;'>({msg.get('reply_time', '')})</span>" if msg.get('reply_time') else ""
+                reply_html = f"""
+                <div style='background-color: #eef1f6; padding: 10px; border-radius: 6px; margin-top: 10px; border-left: 3px solid #0056b3; margin-left: 15px;'>
+                    <span style='font-weight: bold; color: #0056b3;'>版主回覆：</span>{reply_time_str}
+                    <p style='margin-top: 5px; color: #444; font-size: 13px; white-space: pre-wrap; margin-bottom: 0;'>{msg['reply']}</p>
+                </div>
+                """
+                
             st.markdown(
                 f"""
                 <div style='background-color: #f8f9fa; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 5px solid #007bff;'>
                     <span style='font-weight: bold; color: #333;'>{msg['author']}</span> 
                     <span style='color: gray; font-size: 11px; margin-left: 10px;'>{msg['time']}</span>
-                    <p style='margin-top: 5px; color: #555; font-size: 14px; white-space: pre-wrap;'>{msg['content']}</p>
+                    <p style='margin-top: 5px; color: #555; font-size: 14px; white-space: pre-wrap; margin-bottom: 5px;'>{msg['content']}</p>
+                    {reply_html}
                 </div>
                 """, 
                 unsafe_allow_html=True
             )
             
-    # ==================== 後台管理區 ====================
+    # ==================== 後台管理與回復區 ====================
     st.write("---")
     with st.expander("🛠️ 留言板後台管理功能"):
         # 提供密碼保護，避免一般訪客誤觸
@@ -1095,19 +1109,62 @@ with tab5:
             if not comments:
                 st.info("目前沒有留言可供管理。")
             else:
-                st.write("選擇要刪除的留言：")
+                st.write("### 留言管理與回復面板")
                 for msg in comments:
+                    st.write("---")
                     col_msg_info, col_del_btn = st.columns([5, 1])
-                    # 預覽顯示格式
-                    col_msg_info.write(f"【{msg['author']}】({msg['time']}): {msg['content'][:30]}...")
                     
-                    # 點擊對應按鈕即刪除
+                    # 預覽顯示格式
+                    col_msg_info.markdown(f"**【{msg['author']}】** ({msg['time']}):  \n{msg['content']}")
+                    
+                    # 刪除留言按鈕
                     if col_del_btn.button("刪除此留言", key=f"del_{msg['id']}", type="secondary"):
-                        # 過濾掉該筆 ID 的留言並寫回檔案
                         comments = [c for c in comments if c["id"] != msg["id"]]
                         save_comments(comments)
                         st.success("留言已順利刪除！")
                         time.sleep(0.5)
                         st.rerun()
+                        
+                    # 回覆顯示狀態
+                    has_reply = "reply" in msg and msg["reply"]
+                    if has_reply:
+                        st.info(f"當前已回覆：{msg['reply']} ({msg.get('reply_time', '')})")
+                        
+                    # 回覆輸入框
+                    reply_input = st.text_input(
+                        "回覆此留言：" if not has_reply else "修改回覆內容：",
+                        value=msg.get("reply", ""),
+                        key=f"rep_input_{msg['id']}"
+                    )
+                    
+                    col_rep_btn1, col_rep_btn2 = st.columns([1.5, 4])
+                    
+                    # 送出/修改回覆
+                    if col_rep_btn1.button("送出/修改回覆", key=f"rep_btn_{msg['id']}", type="primary"):
+                        if reply_input.strip():
+                            for c in comments:
+                                if c["id"] == msg["id"]:
+                                    c["reply"] = reply_input.strip()
+                                    c["reply_time"] = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+                                    break
+                            save_comments(comments)
+                            st.success("回覆送出成功！")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.warning("請填寫回覆內容！")
+                            
+                    # 刪除已有回覆
+                    if has_reply and col_rep_btn2.button("刪除此回覆", key=f"rep_del_{msg['id']}", type="secondary"):
+                        for c in comments:
+                            if c["id"] == msg["id"]:
+                                c["reply"] = ""
+                                c["reply_time"] = ""
+                                break
+                        save_comments(comments)
+                        st.success("已清除回覆！")
+                        time.sleep(0.5)
+                        st.rerun()
+                        
         elif admin_pwd:
             st.error("密碼輸入錯誤，請重新確認！")
