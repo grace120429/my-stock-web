@@ -289,7 +289,7 @@ with tab1:
         f_active = col_m1.checkbox("外資", value=True)
         t_active = col_m2.checkbox("投信", value=False)
         d_active = col_m3.checkbox("自營商", value=True)
-        m_active = col_m4.checkbox("融資 (資增)", value=True)
+        m_active = col_m4.checkbox("融資 (資增)", value=False)
         m_balance_active = col_m5.checkbox("融資 (餘額最高)", value=False)  # 全市場融資最大量排行選項
         eps_surge_active = col_m6.checkbox("EPS 暴增", value=False)  # 核心選股
         b_active = col_m7.checkbox("分點券商", value=False)
