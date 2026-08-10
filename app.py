@@ -7,6 +7,7 @@ import time
 import json
 import os
 
+# 載入您自訂的子模組
 import config
 import helpers
 import storage
@@ -53,6 +54,30 @@ def save_local_piggy_bank(new_dict):
     except Exception:
         pass
     storage.save_piggy_bank(new_dict)
+
+# ==================== 側邊欄公告檔案讀寫輔助函數 ====================
+ANNOUNCEMENT_FILE = "announcement.json"
+
+def load_announcement():
+    """載入側邊欄公告"""
+    if not os.path.exists(ANNOUNCEMENT_FILE):
+        return {
+            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
+            "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+        }
+    try:
+        with open(ANNOUNCEMENT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {"content": "歡迎使用選股工具！", "date": ""}
+
+def save_announcement(data):
+    """儲存側邊欄公告"""
+    try:
+        with open(ANNOUNCEMENT_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"儲存公告失敗: {e}")
 
 # ==================== 頁面基本設定 ====================
 st.set_page_config(layout="wide", page_title="台股三大法人飆股選股工具")
@@ -117,30 +142,6 @@ def save_comments(comments):
             json.dump(comments, f, ensure_ascii=False, indent=4)
     except Exception as e:
         st.error(f"儲存留言失敗: {e}")
-
-# ==================== 側邊欄公告檔案讀寫輔助函數 ====================
-ANNOUNCEMENT_FILE = "announcement.json"
-
-def load_announcement():
-    """載入側邊欄公告"""
-    if not os.path.exists(ANNOUNCEMENT_FILE):
-        return {
-            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
-            "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
-        }
-    try:
-        with open(ANNOUNCEMENT_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {"content": "歡迎使用選股工具！", "date": ""}
-
-def save_announcement(data):
-    """儲存側邊欄公告"""
-    try:
-        with open(ANNOUNCEMENT_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        st.error(f"儲存公告失敗: {e}")
 
 # ==================== 網頁專用精美 HTML 除息行事曆渲染器 ====================
 def render_streamlit_calendar(year, month, events):
@@ -612,6 +613,7 @@ with tab1:
                             continue
                             
                 if final_rows:
+                    # 將成功篩選出的名單寫入記憶體中
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
@@ -664,130 +666,148 @@ with tab2:
     # 載入自選監控
     watchlist = get_local_watchlist()
     
-    col_w1, col_w2 = st.columns([1, 3])
-    with col_w1:
-        st.write("自選股管理")
-        new_watchlist_code = st.text_input("輸入股票代號加入自選：", max_chars=6, key="add_w")
-        if st.button("加入自選清單"):  # 商用版：移除表情符號
-            if new_watchlist_code:
-                new_watchlist_code = new_watchlist_code.strip()
-                if new_watchlist_code not in watchlist:
-                    watchlist.append(new_watchlist_code)
-                    save_local_watchlist(watchlist)
-                    st.success(f"已成功新增自選股 {new_watchlist_code}！")
-                    time.sleep(0.5)
-                    st.rerun()
-                else:
-                    st.info(f"股票代號 {new_watchlist_code} 已存在於自選名單中。")
-                    
-        # 批次勾選下拉移除選單
-        st.write("---")
-        st.write("批次移除自選股")
-        if watchlist:
-            remove_targets = st.multiselect(
-                "選擇要移除的股票：",
-                options=watchlist,
-                default=[],
-                help="您可以直接勾選一或多個代號，進行批次刪除"
-            )
-            if st.button("批次移除選中項目", type="secondary"):
-                if remove_targets:
-                    updated_watchlist = [code for code in watchlist if code not in remove_targets]
-                    save_local_watchlist(updated_watchlist)
-                    st.success(f"已成功移除：{', '.join(remove_targets)}！")
-                    time.sleep(0.5)
-                    st.rerun()
-                else:
-                    st.warning("請先在上方下拉選單選取要移除的股票代號！")
-        else:
-            st.caption("目前無監控股票，無法進行移除。")
+    # ==================== 核心優化：將原本左右分割的排版，改成精美的大型「上方水平控制卡片」 ====================
+    with st.container(border=True):
+        col_add, col_rem = st.columns(2)
         
-        st.write("---")
-        st.write("目前監控中的股票代號：")
+        # 左半邊：自選股新增
+        with col_add:
+            st.markdown("**➕ 新增自選股**")
+            col_add_input, col_add_btn = st.columns([3, 1])
+            with col_add_input:
+                new_watchlist_code = st.text_input(
+                    "輸入股票代號加入自選：", 
+                    max_chars=6, 
+                    key="add_w", 
+                    label_visibility="collapsed",  # 隱藏預設標籤，與按鈕完美對齊
+                    placeholder="請輸入台股代號 (如: 2330)"
+                )
+            with col_add_btn:
+                if st.button("加入自選", use_container_width=True, type="primary", key="btn_add_tab2"):
+                    if new_watchlist_code:
+                        new_watchlist_code = new_watchlist_code.strip()
+                        if new_watchlist_code not in watchlist:
+                            watchlist.append(new_watchlist_code)
+                            save_local_watchlist(watchlist)
+                            st.success(f"已新增 {new_watchlist_code}！")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.info(f"{new_watchlist_code} 已存在名單中。")
+                            
+        # 右半邊：自選股批次移除
+        with col_rem:
+            st.markdown("**🗑️ 批次移除自選股**")
+            if watchlist:
+                col_rem_select, col_rem_btn = st.columns([3, 1])
+                with col_rem_select:
+                    remove_targets = st.multiselect(
+                        "選擇要移除的股票：",
+                        options=watchlist,
+                        default=[],
+                        label_visibility="collapsed",  # 隱藏預設標籤，與按鈕對齊
+                        placeholder="請選擇待刪除代號"
+                    )
+                with col_rem_btn:
+                    if st.button("確認移除", use_container_width=True, type="secondary", key="btn_rem_tab2"):
+                        if remove_targets:
+                            updated_watchlist = [code for code in watchlist if code not in remove_targets]
+                            save_local_watchlist(updated_watchlist)
+                            st.success(f"已成功移除：{', '.join(remove_targets)}！")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.warning("請先選取移除標的！")
+            else:
+                st.caption("目前監控清單為空。")
+                
+    # ==================== 下方：全螢幕寬度的數據表格區 ====================
+    st.write("---")
+    st.markdown("### 自選股雙週期趨勢與警示看板")
+    
+    col_refresh, col_codes = st.columns([1, 4])
+    with col_refresh:
+        if st.button("🔄 重新整理自選數據", use_container_width=True):
+            st.session_state.yf_cache.clear()
+            st.session_state.yf_60m_cache.clear()
+            st.success("快取已清除，正在重新抓取...")
+            time.sleep(0.5)
+            st.rerun()
+    with col_codes:
         if watchlist:
-            st.info(", ".join(watchlist))
+            st.markdown(f"**目前監控中的股票代號：** `{', '.join(watchlist)}`")
         else:
             st.warning("目前監控清單為空。")
-
-    with col_w2:
-        st.write("自選股雙週期趨勢與警示看板")
+            
+    if watchlist:
+        w_rows = []
+        errors_log_tab2 = []
         
-        if watchlist:
-            if st.button("手動重新整理自選數據"):  # 商用版：移除表情符號
-                st.session_state.yf_cache.clear()
-                st.session_state.yf_60m_cache.clear()
-                st.success("快取已清除，正在重新抓取...")
-                time.sleep(0.5)
-                st.rerun()
+        # 建立線程安全獨立 Session
+        yf_session_tab2 = create_yf_session()
+        
+        with st.spinner("正在分析自選股趨勢與支撐壓力點，請稍候..."):
+            revenue_data = data_fetcher.fetch_monthly_revenue()
+            tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
+            tdcc_ratios, tdcc_changes = {}, {}
+            if tdcc_raw and tdcc_date:
+                tdcc_ratios, tdcc_changes, _ = storage.save_and_get_tdcc_change(tdcc_raw, tdcc_date)
                 
-            w_rows = []
-            errors_log_tab2 = []
-            
-            # 建立線程安全獨立 Session
-            yf_session_tab2 = create_yf_session()
-            
-            with st.spinner("正在分析自選股趨勢與支撐壓力點，請稍候..."):
-                revenue_data = data_fetcher.fetch_monthly_revenue()
-                tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
-                tdcc_ratios, tdcc_changes = {}, {}
-                if tdcc_raw and tdcc_date:
-                    tdcc_ratios, tdcc_changes, _ = storage.save_and_get_tdcc_change(tdcc_raw, tdcc_date)
+            for code in watchlist:
+                ticker = f"{code}.TW"
+                name = data_fetcher.fetch_stock_name_fast(code)
+                
+                # 智慧型提示初始化 (分頁二同步支援)
+                is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
+                latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
+                latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
+                
+                try:
+                    time.sleep(0.15)  # 安全等待
                     
-                for code in watchlist:
-                    ticker = f"{code}.TW"
-                    name = data_fetcher.fetch_stock_name_fast(code)
-                    
-                    # 智慧型提示初始化 (分頁二同步支援)
-                    is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
-                    latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
-                    latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
-                    
-                    try:
-                        time.sleep(0.15)  # 安全等待
-                        
+                    stock = yf.Ticker(ticker, session=yf_session_tab2)
+                    hist = stock.history(period="6mo")
+                    if hist.empty:
+                        ticker = f"{code}.TWO"
                         stock = yf.Ticker(ticker, session=yf_session_tab2)
                         hist = stock.history(period="6mo")
-                        if hist.empty:
-                            ticker = f"{code}.TWO"
-                            stock = yf.Ticker(ticker, session=yf_session_tab2)
-                            hist = stock.history(period="6mo")
+                    
+                    if hist.empty or len(hist) < 20:
+                        errors_log_tab2.append(f"{code}: 歷史K線數據不足")
+                        continue
                         
-                        if hist.empty or len(hist) < 20:
-                            errors_log_tab2.append(f"{code}: 歷史K線數據不足")
-                            continue
-                            
-                        # 分頁二（自選監控）自動載入最新年度與單季 EPS 數據
-                        if not is_code_etf_tab2:
+                    # 分頁二（自選監控）自動載入最新年度與單季 EPS 數據
+                    if not is_code_etf_tab2:
+                        try:
                             try:
-                                try:
-                                    q_stmt = stock.quarterly_income_stmt
-                                    a_stmt = stock.income_stmt
-                                except:
-                                    q_stmt = stock.quarterly_financials
-                                    a_stmt = stock.financials
-                                q_eps_series = get_eps_from_stmt(q_stmt)
-                                a_eps_series = get_eps_from_stmt(a_stmt)
-                                if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
-                                    latest_q_eps = q_eps_series.iloc[0]
-                                    
-                                    # 計算最新單季所在的季度標記 (例如 2025Q3)
-                                    q_date = q_eps_series.index[0]
-                                    q_str = get_quarter_str(q_date)
-                                    
-                                    # 抓取「去年年度EPS」 (例如當前為 2026 年，則主動抓取並顯示 2025 年)
-                                    target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
-                                    a_eps_val = None
-                                    a_eps_year = None
-                                    for idx_date, val in a_eps_series.items():
-                                        try:
-                                            dt = pd.to_datetime(idx_date)
-                                            if dt.year == target_year:
-                                                a_eps_val = val
-                                                a_eps_year = target_year
-                                                break
-                                        except:
-                                            pass
-                                    if a_eps_val is None:
+                                q_stmt = stock.quarterly_income_stmt
+                                a_stmt = stock.income_stmt
+                            except:
+                                q_stmt = stock.quarterly_financials
+                                a_stmt = stock.financials
+                            q_eps_series = get_eps_from_stmt(q_stmt)
+                            a_eps_series = get_eps_from_stmt(a_stmt)
+                            if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
+                                latest_q_eps = q_eps_series.iloc[0]
+                                
+                                # 計算最新單季所在的季度標記 (例如 2025Q3)
+                                q_date = q_eps_series.index[0]
+                                q_str = get_quarter_str(q_date)
+                                
+                                # 抓取「去年年度EPS」 (例如當前為 2026 年，則主動抓取並顯示 2025 年)
+                                target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
+                                a_eps_val = None
+                                a_eps_year = None
+                                for idx_date, val in a_eps_series.items():
+                                    try:
+                                        dt = pd.to_datetime(idx_date)
+                                        if dt.year == target_year:
+                                            a_eps_val = val
+                                            a_eps_year = target_year
+                                            break
+                                    except:
+                                        pass
+                                if a_eps_val is None:
                                         try:
                                             first_date = a_eps_series.index[0]
                                             dt = pd.to_datetime(first_date)
@@ -795,98 +815,96 @@ with tab2:
                                             a_eps_year = dt.year
                                         except:
                                             pass
-                                    
-                                    if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
-                                        latest_q_eps_val_tab2 = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
-                                        latest_a_eps_val_tab2 = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
-                                    else:
-                                        latest_q_eps_val_tab2 = "N/A"
-                                        latest_a_eps_val_tab2 = "N/A"
+                                
+                                if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
+                                    latest_q_eps_val_tab2 = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
+                                    latest_a_eps_val_tab2 = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
                                 else:
                                     latest_q_eps_val_tab2 = "N/A"
                                     latest_a_eps_val_tab2 = "N/A"
-                            except:
+                            else:
                                 latest_q_eps_val_tab2 = "N/A"
                                 latest_a_eps_val_tab2 = "N/A"
-                                
-                        price = hist['Close'].iloc[-1]
-                        prev_price = hist['Close'].iloc[-2]
-                        pct_change = ((price - prev_price) / prev_price) * 100
-                        
-                        # MACD 與警示 (依台股常規調整色彩：空頭🟢，多頭🔴)
-                        latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
-                        raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
-                        
-                        if latest_osc_daily is not None and latest_osc_daily <= 0:
-                            macd_daily_status = f"🟢 {raw_macd_daily}"
-                        else:
-                            macd_daily_status = f"🔴 {raw_macd_daily}"
-                        
-                        # 60m MACD (同樣依台股常規套用🟢/🔴)
-                        try:
-                            stock_60m = yf.Ticker(ticker, session=yf_session_tab2)
-                            hist_60m = stock_60m.history(interval="60m", period="1mo")
-                            latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
-                            raw_macd_60m = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
-                            
-                            if latest_osc_60m is not None and latest_osc_60m <= 0:
-                                macd_60m_status = f"🟢 {raw_macd_60m}"
-                            else:
-                                macd_60m_status = f"🔴 {raw_macd_60m}"
                         except:
-                            macd_60m_status = "N/A"
-                            latest_osc_60m = None
+                            latest_q_eps_val_tab2 = "N/A"
+                            latest_a_eps_val_tab2 = "N/A"
                             
-                        is_daily_bear = (latest_osc_daily is not None and latest_osc_daily <= 0)
-                        is_60m_bear = (latest_osc_60m is not None and latest_osc_60m <= 0)
-                        if is_daily_bear and is_60m_bear:
-                            alert_str = "🟢 賣出警示 (MACD雙空)"
-                        elif is_daily_bear and not is_60m_bear:
-                            alert_str = "🟡 先驅起漲 (日空/短轉強)"
-                        elif not is_daily_bear and is_60m_bear:
-                            alert_str = "🟡 短線修正 (日多/短轉弱)"
+                    price = hist['Close'].iloc[-1]
+                    prev_price = hist['Close'].iloc[-2]
+                    pct_change = ((price - prev_price) / prev_price) * 100
+                    
+                    # MACD 與警示 (依台股常規調整色彩：空頭🟢，多頭🔴)
+                    latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
+                    raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
+                    
+                    if latest_osc_daily is not None and latest_osc_daily <= 0:
+                        macd_daily_status = f"🟢 {raw_macd_daily}"
+                    else:
+                        macd_daily_status = f"🔴 {raw_macd_daily}"
+                    
+                    # 60m MACD (同樣依台股常規套用🟢/🔴)
+                    try:
+                        stock_60m = yf.Ticker(ticker, session=yf_session_tab2)
+                        hist_60m = stock_60m.history(interval="60m", period="1mo")
+                        latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
+                        raw_macd_60m = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                        
+                        if latest_osc_60m is not None and latest_osc_60m <= 0:
+                            macd_60m_status = f"🟢 {raw_macd_60m}"
                         else:
-                            alert_str = "🔴 趨勢強勢 (MACD雙多)"
+                            macd_60m_status = f"🔴 {raw_macd_60m}"
+                    except:
+                        macd_60m_status = "N/A"
+                        latest_osc_60m = None
                         
-                        # 自選股同步運算量能突破，並拼接進狀態欄
-                        latest_vol = hist['Volume'].iloc[-1]
-                        prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
-                        vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
-                        vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
-                        alert_str_display = f"{alert_str} ({vol_status_str})"
-                            
-                        sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
+                    is_daily_bear = (latest_osc_daily is not None and latest_osc_daily <= 0)
+                    is_60m_bear = (latest_osc_60m is not None and latest_osc_60m <= 0)
+                    if is_daily_bear and is_60m_bear:
+                        alert_str = "🟢 賣出警示 (MACD雙空)"
+                    elif is_daily_bear and not is_60m_bear:
+                        alert_str = "🟡 先驅起漲 (日空/短轉強)"
+                    elif not is_daily_bear and is_60m_bear:
+                        alert_str = "🟡 短線修正 (日多/短轉弱)"
+                    else:
+                        alert_str = "🔴 趨勢強勢 (MACD雙多)"
+                    
+                    # 自選股同步運算量能突破，並拼接進狀態欄
+                    latest_vol = hist['Volume'].iloc[-1]
+                    prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
+                    vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
+                    vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
+                    alert_str_display = f"{alert_str} ({vol_status_str})"
                         
-                        # 👈 核心重整：分頁二（自選監控）比照關聯性優化順序 (代號 -> 名稱 -> 價格 -> EPS -> 營收 -> 籌碼大戶 -> 技術指標)
-                        w_rows.append({
-                            "代號": code,
-                            "股票名稱": name,
-                            "現價": round(price, 1),
-                            "漲跌幅(%)": round(pct_change, 2),
-                            "最新單季EPS": latest_q_eps_val_tab2,  # 👈 EPS 數據
-                            "去年年度EPS": latest_a_eps_val_tab2,  # 👈 修正為去年年度EPS
-                            "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),  # 👈 營收緊貼放在EPS後面
-                            "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",  # 👈 大戶比例緊貼放在營收後面
-                            "日K_MACD": macd_daily_status,
-                            "60分K_MACD": macd_60m_status,
-                            "趨勢狀態": alert_str_display,
-                            "短期支壓(1M)": sr_1m,
-                            "中期支壓(6M)": sr_6m
-                        })
-                    except Exception as ex_tab2:
-                        errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
-                        continue
-                        
-            if w_rows:
-                st.dataframe(pd.DataFrame(w_rows), use_container_width=True)
-            else:
-                st.warning("自選股數據分析失敗，請查看下方診斷報告。")
-                
-            if errors_log_tab2:
-                with st.expander("⚠️ 查看自選背景診斷報告"):
-                    st.write(errors_log_tab2)
+                    sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
+                    
+                    # 👈 核心重整：分頁二（自選監控）比照關聯性優化順序 (代號 -> 名稱 -> 價格 -> EPS -> 營收 -> 籌碼大戶 -> 技術指標)
+                    w_rows.append({
+                        "代號": code,
+                        "股票名稱": name,
+                        "現價": round(price, 1),
+                        "漲跌幅(%)": round(pct_change, 2),
+                        "最新單季EPS": latest_q_eps_val_tab2,  # 👈 EPS 數據
+                        "去年年度EPS": latest_a_eps_val_tab2,  # 👈 修正為去年年度EPS
+                        "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),  # 👈 營收緊貼放在EPS後面
+                        "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",  # 👈 大戶比例緊貼放在營收後面
+                        "日K_MACD": macd_daily_status,
+                        "60分K_MACD": macd_60m_status,
+                        "趨勢狀態": alert_str_display,
+                        "短期支壓(1M)": sr_1m,
+                        "中期支壓(6M)": sr_6m
+                    })
+                except Exception as ex_tab2:
+                    errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
+                    continue
+                    
+        if w_rows:
+            st.dataframe(pd.DataFrame(w_rows), use_container_width=True)
         else:
-            st.info("目前自選觀察名單為空。請在左側輸入股票代碼並點擊加入，系統將會自動為您監控趨勢！")
+            st.warning("自選股數據分析失敗，請查看下方診斷報告。")
+            
+        if errors_log_tab2:
+            with st.expander("⚠️ 查看自選背景診斷報告"):
+                st.write(errors_log_tab2)
 
 # ==================== 【分頁三：主力券商進出】 ====================
 with tab3:
