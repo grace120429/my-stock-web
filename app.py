@@ -143,6 +143,30 @@ def save_comments(comments):
     except Exception as e:
         st.error(f"儲存留言失敗: {e}")
 
+# ==================== 側邊欄公告檔案讀寫輔助函數 ====================
+ANNOUNCEMENT_FILE = "announcement.json"
+
+def load_announcement():
+    """載入側邊欄公告"""
+    if not os.path.exists(ANNOUNCEMENT_FILE):
+        return {
+            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
+            "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+        }
+    try:
+        with open(ANNOUNCEMENT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {"content": "歡迎使用選股工具！", "date": ""}
+
+def save_announcement(data):
+    """儲存側邊欄公告"""
+    try:
+        with open(ANNOUNCEMENT_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"儲存公告失敗: {e}")
+
 # ==================== 網頁專用精美 HTML 除息行事曆渲染器 ====================
 def render_streamlit_calendar(year, month, events):
     """
@@ -281,7 +305,7 @@ with tab1:
     col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
     
     with col_cfg1:
-        days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 30, 60, 120], index=2, key="tab1_days")
+        days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
         
     with col_cfg2:
         st.write("核心籌碼與信用篩選：")
@@ -289,8 +313,18 @@ with tab1:
         f_active = col_m1.checkbox("外資", value=True)
         t_active = col_m2.checkbox("投信", value=False)
         d_active = col_m3.checkbox("自營商", value=True)
-        m_active = col_m4.checkbox("融資 (資增)", value=False)
-        m_balance_active = col_m5.checkbox("融資 (餘額最高)", value=False)  # 全市場融資最大量排行選項
+        
+        # 為融資餘額勾選框加上懸停提示
+        m_active = col_m4.checkbox(
+            "融資 (資增)", 
+            value=True,
+            help="⚠️ 提示：每日最新融資變動數據，需等待證交所於 21:00 ~ 22:00 結算完畢後始可下載更新。"
+        )
+        m_balance_active = col_m5.checkbox(
+            "融資 (餘額最高)", 
+            value=False,
+            help="⚠️ 提示：每日最新融資餘額數據，需等待證交所於 21:00 ~ 22:00 結算完畢後始可下載更新。"
+        )
         eps_surge_active = col_m6.checkbox("EPS 暴增", value=False)  # 核心選股
         b_active = col_m7.checkbox("分點券商", value=False)
         
@@ -307,6 +341,7 @@ with tab1:
         filter_vol = st.checkbox("量能突破 (爆量 2x)", value=True)
 
     # 執行篩選
+    st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。")
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
         with st.spinner("正在進行大數據分析，請稍候..."):
             # 1. 抓取三大法人數據
