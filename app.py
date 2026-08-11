@@ -305,10 +305,10 @@ with tab1:
         col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.5, 2.5])
         
         with col_cfg1:
-            days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 30, 60, 120], index=2, key="tab1_days")
+            days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
             
         with col_cfg2:
-            # 💡 重大美化：改用精美的多選 Pills 標籤，解決原本單選勾選框垂直折行的難看問題！
+            # SaaS 科技感多選標籤 (Pills)
             chip_options = ["外資", "投信", "自營商", "融資 (資增)", "融資 (餘額最高)", "EPS 暴增", "分點券商"]
             selected_chips = st.multiselect(
                 "核心籌碼與信用篩選 (可複選)：",
@@ -325,12 +325,16 @@ with tab1:
             eps_surge_active = "EPS 暴增" in selected_chips
             b_active = "分點券商" in selected_chips
             
-            # 動態載入自訂分點下拉選單（只有在選取了「分點券商」時才會優雅彈出，節省空間！）
+            # 💡 核心升級：若選取「分點券商」，改用「多選標籤（st.multiselect）」以支援多重主力交集功能！
             brokers_dict = storage.load_custom_brokers()
             if b_active:
-                selected_broker_name = st.selectbox("選定主力分點：", list(brokers_dict.keys()), index=0)
+                selected_broker_names = st.multiselect(
+                    "選定主力分點 (多選取交集，即所有選中的分點都必須買超)：",
+                    options=list(brokers_dict.keys()),
+                    default=[list(brokers_dict.keys())[0]] if brokers_dict else []
+                )
             else:
-                selected_broker_name = list(brokers_dict.keys())[0] if brokers_dict else ""
+                selected_broker_names = []
 
         with col_cfg3:
             # 技術指標也同步改造成精美的多選 Pills 標籤
@@ -346,7 +350,7 @@ with tab1:
             filter_vol = "量能突破 (爆量 2x)" in selected_techs
 
     # 執行篩選
-    st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。")
+    st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。若勾選多個分點取交集，下載時間可能會增加數秒。")
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
         with st.spinner("正在進行大數據分析，請稍候..."):
             # 1. 抓取三大法人數據
@@ -371,13 +375,32 @@ with tab1:
                 # 4. 下載月營收
                 revenue_data = data_fetcher.fetch_monthly_revenue()
                 
-                # 5. 如果勾選分點券商，下載特定券商資料
-                tab1_broker_data = {}
-                if b_active:
-                    broker_id = brokers_dict.get(selected_broker_name)
-                    if broker_id:
-                        days_param = 5 if days_count <= 7 else 20
-                        tab1_broker_data = data_fetcher.fetch_broker_net_buys(broker_id, days_param)
+                # 💡 5. 多分點主力券商數據抓取（支援取交集）
+                multi_broker_data = {}
+                if b_active and selected_broker_names:
+                    days_param = 5 if days_count <= 7 else 20
+                    for b_name in selected_broker_names:
+                        broker_id = brokers_dict.get(b_name)
+                        if broker_id:
+                            broker_results = data_fetcher.fetch_broker_net_buys(broker_id, days_param)
+                            # 僅篩選並保留該分點淨買超金額大於 0 的個股數據
+                            multi_broker_data[b_name] = {
+                                code: item for code, item in broker_results.items() if item["diff"] > 0
+                            }
+
+                # 建立多重券商交集判定輔助函數
+                def check_broker_intersection(code):
+                    if not b_active or not selected_broker_names:
+                        return True, 0.0
+                    
+                    total_diff = 0.0
+                    for b_name in selected_broker_names:
+                        b_data = multi_broker_data.get(b_name, {})
+                        if code not in b_data:
+                            # 只要其中有一個選取的分點沒有買入，就淘汰
+                            return False, 0.0
+                        total_diff += b_data[code]["diff"]
+                    return True, total_diff
 
                 # --- 篩選與計算邏輯 ---
                 combined = raw_data.copy()
@@ -425,7 +448,14 @@ with tab1:
                 summary['自營_張'] = summary[col_dealer] / 1000 if col_dealer else 0
                 summary['融資_張'] = summary['證券代號'].apply(lambda c: margin_data.get(c, {}).get("change", 0.0))
                 summary['融資_餘額'] = summary['證券代號'].apply(lambda c: margin_data.get(c, {}).get("today", 0.0))  # 映射融資總餘額
-                summary['分點_萬'] = summary['證券代號'].apply(lambda c: tab1_broker_data.get(c, {}).get("diff", 0.0) if b_active else 0.0)
+                
+                # 💡 運算主力多重交集與分數累加
+                summary['券商符合交集'] = True
+                summary['分點_萬'] = 0.0
+                if b_active and selected_broker_names:
+                    res_tuples = summary['證券代號'].apply(check_broker_intersection)
+                    summary['券商符合交集'] = [t[0] for t in res_tuples]
+                    summary['分點_萬'] = [t[1] for t in res_tuples]
                 
                 filtered_summary = summary.copy()
                 filtered_summary['排序得分'] = 0.0
@@ -449,10 +479,11 @@ with tab1:
                         filtered_summary['排序得分'] += filtered_summary['融資_張']
                     if m_balance_active:
                         filtered_summary = filtered_summary[filtered_summary['融資_餘額'] > 0]
-                        filtered_summary['排序得分'] += filtered_summary['融資_餘額']  # 同位加權
+                        filtered_summary['排序得分'] += filtered_summary['融資_餘額']
                     if b_active:
-                        filtered_summary = filtered_summary[filtered_summary['分點_萬'] > 0]
-                        filtered_summary['排序得分'] += filtered_summary['分點_萬'] 
+                        # 必須同時存在於所有選取主力券商的買超名單中（交集）
+                        filtered_summary = filtered_summary[filtered_summary['券商符合交集'] == True]
+                        filtered_summary['排序得分'] += filtered_summary['分點_萬']
                     
                     # 核心選股：如果「完全不勾三大法人與信用融資」，只勾選「EPS 暴增」進行獨立選股
                     if eps_surge_active and not (f_active or t_active or d_active or m_active or m_balance_active or b_active):
@@ -460,11 +491,11 @@ with tab1:
                             filtered_summary[col_foreign].abs() / 1000 + 
                             filtered_summary[col_trust].abs() / 1000 + 
                             filtered_summary[col_dealer].abs() / 1000 + 
-                            filtered_summary['融資_餘額'] 
+                            filtered_summary['融資_餘額']
                         )
-                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(100)
+                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(80)
                     else:
-                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(100)
+                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(50)
                     
                     # 逐檔 analysis 多週期與技術面指標
                     final_rows = []
@@ -763,7 +794,7 @@ with tab2:
                 
     # ==================== 下方：全螢幕寬度的數據表格區 ====================
     st.write("---")
-    st.markdown("### 自選股趨勢與警示看板")
+    st.markdown("### 自選股雙週期趨勢與警示看板")
     
     col_refresh, col_codes = st.columns([1, 4])
     with col_refresh:
@@ -864,6 +895,7 @@ with tab2:
                                     latest_a_eps_val_tab2 = "N/A"
                             else:
                                 latest_q_eps_val_tab2 = "N/A"
+                                
                                 latest_a_eps_val_tab2 = "N/A"
                         except:
                             latest_q_eps_val_tab2 = "N/A"
