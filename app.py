@@ -106,6 +106,12 @@ if "yf_60m_cache" not in st.session_state:
 if "tab1_results" not in st.session_state:
     st.session_state.tab1_results = None
 
+# 初始化融資回溯所需的狀態變數，避免 Rerun 時狀態丟失
+if "margin_date_used" not in st.session_state:
+    st.session_state.margin_date_used = ""
+if "margin_is_fallback" not in st.session_state:
+    st.session_state.margin_is_fallback = False
+
 # ==================== 100% 執行緒安全防阻擋連線產生器 ====================
 def create_yf_session():
     """
@@ -370,9 +376,30 @@ with tab1:
                 else:
                     tdcc_ratios, tdcc_changes = {}, {}
                 
-                # 3. 背景獲取最新一期融資數據
-                latest_date_str = sorted(t86_dates)[-1] if t86_dates else ""
-                margin_data = data_fetcher.fetch_all_margin(latest_date_str) if latest_date_str else {}
+                # 💡 3. 背景獲取融資數據（新增自動往前回溯的自癒機制）
+                margin_data = {}
+                margin_date_used = ""
+                st.session_state.margin_is_fallback = False
+                
+                # 依日期由新到舊排序
+                sorted_dates = sorted(t86_dates, reverse=True) if t86_dates else []
+                
+                for d_str in sorted_dates:
+                    temp_margin = data_fetcher.fetch_all_margin(d_str)
+                    if temp_margin:  # 只要獲取到有效（非空）資料，即代表該日數據有效
+                        margin_data = temp_margin
+                        margin_date_used = d_str
+                        # 如果採用的不是列表中最新的一天，標記為已啟用回溯
+                        if d_str != sorted_dates[0]:
+                            st.session_state.margin_is_fallback = True
+                        break
+                    time.sleep(0.2)  # 微小等待，防連線過於頻繁被阻擋
+                
+                if not margin_date_used and sorted_dates:
+                    margin_date_used = sorted_dates[0]
+                
+                # 寫入 Session State 中，確保 Rerun 時資料不失真
+                st.session_state.margin_date_used = margin_date_used
                 
                 # 4. 下載月營收
                 revenue_data = data_fetcher.fetch_monthly_revenue()
@@ -529,7 +556,7 @@ with tab1:
                         try:
                             time.sleep(0.15)  # 禮貌防阻擋安全等待
                             
-                            # 無條件建立 stock 對象 (解決在快取讀取時變數 undefined 崩潰)
+                            # 無條件建立 stock 對象
                             stock = yf.Ticker(ticker, session=yf_session)
                             
                             # 使用 Session State 做為 K 線資料快取
@@ -560,7 +587,7 @@ with tab1:
                                     q_date = q_eps_series.index[0]
                                     q_str = get_quarter_str(q_date)
                                     
-                                    # 抓取「去年年度EPS」（例如當前為 2026 年，則主動抓取並顯示 2025 年）
+                                    # 抓取「去年年度EPS」
                                     target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
                                     a_eps_val = None
                                     a_eps_year = None
@@ -615,7 +642,7 @@ with tab1:
                                 continue
                                 
                             is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
-                            ma_status = "均線向上" if is_bullish else "整理/向下"  # 商用版：移除表情符號
+                            ma_status = "均線向上" if is_bullish else "整理/向下"
                             if filter_ma and not is_bullish:
                                 continue
                                 
@@ -635,7 +662,7 @@ with tab1:
                             if filter_macd and "MACD金叉" not in macd_daily_status and "多頭" not in macd_daily_status:
                                 continue
                                 
-                            # 60分K MACD (同樣依台股常規套用 🟢/🔴 色彩標誌)
+                            # 60分K MACD
                             try:
                                 if ticker in st.session_state.yf_60m_cache:
                                     hist_60m = st.session_state.yf_60m_cache[ticker]
@@ -660,7 +687,6 @@ with tab1:
                             prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
                             pct_change = ((price - prev_price) / prev_price) * 100
                             
-                            # 👈 核心重整：依照關聯性重新組合欄位順序
                             final_rows.append({
                                 "代號": code,
                                 "股票名稱": name,
@@ -696,6 +722,20 @@ with tab1:
     if st.session_state.tab1_results is not None:
         if len(st.session_state.tab1_results) > 0:
             df_res = pd.DataFrame(st.session_state.tab1_results)
+            
+            # 💡 核心優化：動態格式化並呈現當前所採用的融資數據日期與回溯備註
+            if st.session_state.margin_date_used:
+                d_str = st.session_state.margin_date_used
+                try:
+                    formatted_margin_date = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:]}"
+                except Exception:
+                    formatted_margin_date = d_str
+                
+                if st.session_state.margin_is_fallback:
+                    st.info(f"💡 提示：最新一日融資數據尚未發布或讀取失敗，已為您自動回溯採用 **{formatted_margin_date}** 之融資明細。")
+                else:
+                    st.caption(f"📊 融資數據基準日：{formatted_margin_date}")
+            
             st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：您可以直接在下方表格最左側進行多選，將選中的股票一鍵加入自選股。)")
             
             # 啟用列選取功能 (selection_mode="multi-row")
@@ -739,7 +779,7 @@ with tab2:
     # 載入自選監控
     watchlist = get_local_watchlist()
     
-    # ==================== 核心優化：將原本左右分割的排版，改成精美的大型「上方水平控制卡片」 ====================
+    # 核心優化：將原本左右分割的排版，改成精美的大型「上方水平控制卡片」
     with st.container(border=True):
         col_add, col_rem = st.columns(2)
         
@@ -794,7 +834,7 @@ with tab2:
             else:
                 st.caption("目前監控清單為空。")
                 
-    # ==================== 下方：全螢幕寬度的數據表格區 ====================
+    # 下方：全螢幕寬度的數據表格區
     st.write("---")
     st.markdown("### 自選股雙週期趨勢與警示看板")
     
@@ -867,7 +907,7 @@ with tab2:
                                 q_date = q_eps_series.index[0]
                                 q_str = get_quarter_str(q_date)
                                 
-                                # 抓取「去年年度EPS」 (例如當前為 2026 年，則主動抓取並顯示 2025 年)
+                                # 抓取「去年年度EPS」
                                 target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
                                 a_eps_val = None
                                 a_eps_year = None
@@ -915,7 +955,7 @@ with tab2:
                     else:
                         macd_daily_status = f"🔴 {raw_macd_daily}"
                     
-                    # 60m MACD (同樣依台股常規套用🟢/🔴)
+                    # 60m MACD
                     try:
                         stock_60m = yf.Ticker(ticker, session=yf_session_tab2)
                         hist_60m = stock_60m.history(interval="60m", period="1mo")
@@ -950,16 +990,16 @@ with tab2:
                         
                     sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
                     
-                    # 👈 核心重整：分頁二（自選監控）比照關聯性優化順序 (代號 -> 名稱 -> 價格 -> EPS -> 營收 -> 籌碼大戶 -> 技術指標)
+                    # 依關聯性優化順序 (代號 -> 名稱 -> 價格 -> EPS -> 營收 -> 籌碼大戶 -> 技術指標)
                     w_rows.append({
                         "代號": code,
                         "股票名稱": name,
                         "現價": round(price, 1),
                         "漲跌幅(%)": round(pct_change, 2),
-                        "最新單季EPS": latest_q_eps_val_tab2,  # 👈 EPS 數據
-                        "去年年度EPS": latest_a_eps_val_tab2,  # 👈 修正為去年年度EPS
-                        "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),  # 👈 營收緊貼放在EPS後面
-                        "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",  # 👈 大戶比例緊貼放在營收後面
+                        "最新單季EPS": latest_q_eps_val_tab2,
+                        "去年年度EPS": latest_a_eps_val_tab2,
+                        "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),
+                        "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
                         "日K_MACD": macd_daily_status,
                         "60分K_MACD": macd_60m_status,
                         "趨勢狀態": alert_str_display,
@@ -984,11 +1024,11 @@ with tab3:
     st.subheader("特寫分點主力特定天數交易明細")
     
     # 自訂分點管理介面
-    with st.expander("管理我的自訂券商分點"):  # 商用版：移除表情符號
+    with st.expander("管理我的自訂券商分點"):
         col_b1, col_b2 = st.columns(2)
         new_b_name = col_b1.text_input("分點名稱 (如: 凱基台北)：")
         new_b_code = col_b2.text_input("分點代號 (4碼，如: 9268)：")
-        if st.button("儲存新分點"):  # 商用版：移除表情符號
+        if st.button("儲存新分點"):
             if new_b_name and new_b_code:
                 brokers_dict[new_b_name] = new_b_code.lower()
                 storage.save_custom_brokers(brokers_dict)
@@ -1000,7 +1040,7 @@ with tab3:
     target_days = col_q2.selectbox("統計天數：", ["近1日", "近5日", "近10日", "近20日"], index=1)
     target_filter = col_q3.selectbox("過濾進出方向：", ["全部進出", "僅顯示買超", "僅顯示賣超"])
     
-    if st.button("開始查詢主力買賣超"):  # 商用版：移除表情符號
+    if st.button("開始查詢主力買賣超"):
         days_map = {"近1日": 1, "近5日": 5, "近10日": 10, "近20日": 20}
         days_param = days_map.get(target_days, 5)
         b_id = brokers_dict.get(target_broker)
@@ -1020,7 +1060,7 @@ with tab3:
                         "買進金額(萬)": item["buy"],
                         "賣出金額(萬)": item["sell"],
                         "淨買超(萬)": diff,
-                        "進出方向": "淨買超" if diff > 0 else "淨賣超"  # 商用版：移除表情符號
+                        "進出方向": "淨買超" if diff > 0 else "淨賣超"
                     })
                 if b_rows:
                     df_b = pd.DataFrame(b_rows).sort_values(by="淨買超(萬)", key=abs, ascending=False)
@@ -1053,7 +1093,7 @@ with tab4:
         col_e1, col_e2 = st.columns([1, 2])
         with col_e1:
             new_etf_code = st.text_input("新增自選 ETF (代碼)：", max_chars=6, key="add_etf_code")
-            if st.button("新增 ETF"):  # 商用版：移除表情符號
+            if st.button("新增 ETF"):
                 if new_etf_code:
                     new_etf_code = new_etf_code.upper().strip()
                     etf_name = data_fetcher.fetch_stock_name_fast(new_etf_code)
@@ -1070,7 +1110,7 @@ with tab4:
                         st.info(f"ETF {new_etf_code} 已經在您的清單中囉！")
                         
             del_etf_code = st.text_input("輸入要移除的 ETF 代碼：", max_chars=6, key="del_etf_code")
-            if st.button("刪除選中 ETF", type="secondary"):  # 商用版：移除表情符號
+            if st.button("刪除選中 ETF", type="secondary"):
                 if del_etf_code:
                     del_etf_code = del_etf_code.upper().strip()
                     if any(item[0] == del_etf_code for item in hot_etfs):
@@ -1105,7 +1145,7 @@ with tab4:
                         "除息交易日": data["ex_date"],
                         "年度累計配息": data["current_year_sum"],
                         "預估年化殖利率": data["yield"],
-                        "除息提醒狀態": data["status"].replace("🔔 ", "").replace("🔴 ", "").replace("⏳ ", "")  # 👈 移除表情
+                        "除息提醒狀態": data["status"].replace("🔔 ", "").replace("🔴 ", "").replace("⏳ ", "")
                     })
                     
                     # 收集除息日期事件至行事曆快取中
@@ -1175,7 +1215,7 @@ with tab4:
         with col_g_in:
             p_gu = st.number_input("零股股數：", min_value=0, max_value=999, step=1, value=0, key="pb_g_val")
             
-        if st.button("更新持股"):  # 商用版：移除表情符號
+        if st.button("更新持股"):
             if p_code:
                 p_code = p_code.upper().strip()
                 # 換算為總張數 (浮點數) 存入本地 LocalStorage，維持完全相容性
@@ -1190,7 +1230,7 @@ with tab4:
                     st.rerun()
                 
         p_del = st.text_input("要移除的代號：", max_chars=6, key="pb_del")
-        if st.button("移除持股"):  # 商用版：移除表情符號
+        if st.button("移除持股"):
             p_del = p_del.upper().strip()
             if p_del in piggy_bank_data:
                 del piggy_bank_data[p_del]
@@ -1214,7 +1254,7 @@ with tab4:
                 latest_div_value = data.get("latest_div_value", 0.0)
                 ex_date_str = data.get("ex_date", "N/A")
                 
-                # 💡 精密換算實際股數與呈現規格
+                # 精密換算實際股數與呈現規格
                 total_gu = int(round(shares * 1000))
                 display_zhang = total_gu // 1000
                 display_gu = total_gu % 1000
@@ -1280,7 +1320,7 @@ with tab5:
         col_author, col_submit = st.columns([1, 3])
         author_name = col_author.text_input("您的稱呼：", max_chars=10, value="匿名讀者")
         comment_content = st.text_area("留言內容：", max_chars=200, placeholder="歡迎在這裡分享您的想法或回饋...")
-        submitted = st.form_submit_button("送出留言")  # 👈 修正此處的函式名稱，排除 AttributeError 報慢
+        submitted = st.form_submit_button("送出留言")
         
         if submitted:
             if not comment_content.strip():
@@ -1342,7 +1382,7 @@ with tab5:
         if admin_pwd == "admin888":
             st.success("身分驗證成功！已開啟管理權限。")
             
-            # 📢 1. 新增：管理者公告編輯面板 📢
+            # 管理者公告編輯面板
             st.write("### 📢 編輯側邊欄公告")
             current_ann = load_announcement()
             new_ann_text = st.text_area(
