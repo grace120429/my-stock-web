@@ -67,7 +67,7 @@ def load_custom_brokers():
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return {k: str(v).lower() for k, v in data.items()}
+                return {k: str(v).upper() for k, v in data.items()}
         except Exception:
             pass
     save_custom_brokers(default_brokers)
@@ -79,7 +79,7 @@ def save_custom_brokers(brokers_dict):
     """
     file_path = "my_brokers.json"
     try:
-        formatted_dict = {k: str(v).lower() for k, v in brokers_dict.items()}
+        formatted_dict = {k: str(v).upper() for k, v in brokers_dict.items()}
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(formatted_dict, f, ensure_ascii=False, indent=2)
     except Exception:
