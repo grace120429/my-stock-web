@@ -7,7 +7,6 @@ import time
 import json
 import os
 
-# 載入您自訂的子模組
 import config
 import helpers
 import storage
