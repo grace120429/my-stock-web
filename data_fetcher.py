@@ -541,7 +541,7 @@ def fetch_etf_dividend_details(code, upcoming_dict):
 
 # ==================== 主力券商特定統計天數交易資料抓取 ====================
 def fetch_broker_net_buys(broker_id, days):
-    broker_id = str(broker_id).lower()
+    broker_id = str(broker_id).upper()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
