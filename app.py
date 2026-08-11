@@ -702,7 +702,7 @@ with tab1:
                             
                             broker_details_str = " | ".join(broker_details_list) if broker_details_list else "無"
                             
-                            # 👈 核心重整：依照關聯性重新組合欄位順序，並加入新設計的「分點買超明細」欄位
+                            # 👈 依照關聯性重新組合欄位順序，並加入主力分點明細資料到背景物件中
                             final_rows.append({
                                 "代號": code,
                                 "股票名稱": name,
@@ -714,7 +714,7 @@ with tab1:
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
-                                "分點買超明細": broker_details_str,  # 👈 新增的主力分點明細資訊 (支援 Hover Tooltip 完整顯示)
+                                "分點買超明細": broker_details_str,  # 💡 隱藏明細，只在下方勾選時動態渲染成漂亮的儀表板卡片
                                 "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),
                                 "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
                                 "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
@@ -753,11 +753,14 @@ with tab1:
                 else:
                     st.caption(f"📊 融資數據基準日：{formatted_margin_date}")
             
-            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：滑鼠懸浮在「分點買超明細」儲存格上方，可自動彈出完整券商買量明細！)")
+            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：勾選下方表格最左側的股票，可在下方即時查看該股的『主力分點進出卡片』與一鍵加入自選。)")
+            
+            # 💡 核心優化：建立僅用於顯示的 DataFrame，排除「分點買超明細」以節省儲存格空間
+            visible_cols = [c for c in df_res.columns if c != "分點買超明細"]
             
             # 啟用列選取功能 (selection_mode="multi-row")
             event = st.dataframe(
-                df_res, 
+                df_res[visible_cols], 
                 column_config={
                     "K線圖網址": st.column_config.LinkColumn("看日K線圖", display_text="開啟奇摩股市")
                 },
@@ -770,8 +773,35 @@ with tab1:
             # 偵測並讀取使用者選取的行數
             selected_rows = event.selection.rows
             if selected_rows:
+                # 💡 核心優化：當使用者在主表格勾選行數時，於下方動態以高質感 Metric 儀表板卡片呈現買超明細 💡
+                st.write("---")
+                st.markdown("### 🎯 已選個股 - 主力分點進出特寫")
+                for idx in selected_rows:
+                    row_data = df_res.iloc[idx]
+                    code = row_data["代號"]
+                    name = row_data["股票名稱"]
+                    details = row_data.get("分點買超明細", "無")
+                    
+                    with st.container(border=True):
+                        st.markdown(f"**📍 {code} {name}**")
+                        if details and details != "無":
+                            detail_items = details.split(" | ")
+                            # 為了防版面過度拉伸，欄位數至少為 4 欄
+                            cols = st.columns(max(len(detail_items), 4))
+                            for i, item in enumerate(detail_items):
+                                try:
+                                    # 解析 "摩根大通: 133張 (508.1萬)" -> "摩根大通" 與 "133張 (508.1萬)"
+                                    parts = item.split(": ")
+                                    broker_name = parts[0]
+                                    shares_and_money = parts[1]
+                                    cols[i].metric(label=broker_name, value=shares_and_money)
+                                except Exception:
+                                    cols[i].write(item)
+                        else:
+                            st.caption("未選取分點，或該股無符合條件之分點買超明細。")
+                
                 selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
-                st.write(f"目前已選取： {', '.join(selected_codes)}")
+                st.write("")
                 if st.button(f"📥 將這 {len(selected_codes)} 檔股票加入自選股", type="primary", key="btn_add_selected_stable"):
                     current_watchlist = get_local_watchlist()
                     added_count = 0
