@@ -450,10 +450,10 @@ with tab1:
                         filtered_summary['排序得分'] += filtered_summary['融資_張']
                     if m_balance_active:
                         filtered_summary = filtered_summary[filtered_summary['融資_餘額'] > 0]
-                        filtered_summary['排序得分'] += filtered_summary['融資_餘額'] / 10.0  # 同位加權
+                        filtered_summary['排序得分'] += filtered_summary['融資_餘額']  # 同位加權
                     if b_active:
                         filtered_summary = filtered_summary[filtered_summary['分點_萬'] > 0]
-                        filtered_summary['排序得分'] += filtered_summary['分點_萬'] / 10.0
+                        filtered_summary['排序得分'] += filtered_summary['分點_萬'] 
                     
                     # 核心選股：如果「完全不勾三大法人與信用融資」，只勾選「EPS 暴增」進行獨立選股
                     if eps_surge_active and not (f_active or t_active or d_active or m_active or m_balance_active or b_active):
@@ -461,7 +461,7 @@ with tab1:
                             filtered_summary[col_foreign].abs() / 1000 + 
                             filtered_summary[col_trust].abs() / 1000 + 
                             filtered_summary[col_dealer].abs() / 1000 + 
-                            filtered_summary['融資_餘額'] / 10.0
+                            filtered_summary['融資_餘額'] 
                         )
                         top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(100)
                     else:
