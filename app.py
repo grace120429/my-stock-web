@@ -19,40 +19,42 @@ from streamlit_local_storage import LocalStorage
 localS = LocalStorage()
 
 def get_local_watchlist():
-    """優先從瀏覽器讀取自選股，若讀不到則以原本的備用檔案當作預設值"""
+    """優先從瀏覽器讀取自選股，若讀不到則回傳一個乾淨、無隱私疑慮的公用預設值"""
     try:
         val = localS.getItem("my_watchlist_local")
         if val is not None and isinstance(val, list):
             return val
     except Exception:
         pass
-    return storage.load_watchlist()
+    # ❌ 拒絕讀取伺服器上的 my_watchlist.json 共享檔案，保護個人自選股不外洩
+    return ["2330", "2303"]  # 預設公用示範股：台積電、聯電
 
 def save_local_watchlist(new_list):
-    """將自選股同時存入瀏覽器，並備份一份到伺服器"""
+    """將自選股存入訪客自己的瀏覽器（100% 本地隱私，絕不備份至伺服器）"""
     try:
         localS.setItem("my_watchlist_local", new_list)
     except Exception:
         pass
-    storage.save_watchlist(new_list)
+    # ❌ 徹底移除 storage.save_watchlist(new_list) 呼叫，不再往雲端硬碟寫入資料
 
 def get_local_piggy_bank():
-    """優先從瀏覽器讀取退休存錢筒持股"""
+    """優先從瀏覽器讀取退休存錢筒持股，若無紀錄則給予一組無關的公用範例（如 0050 持有 1 張）"""
     try:
         val = localS.getItem("my_piggy_bank_local")
         if val is not None and isinstance(val, dict):
             return val
     except Exception:
         pass
-    return storage.load_piggy_bank()
+    # ❌ 拒絕讀取伺服器上的 my_piggy_bank.json 共享檔案，保護個人持股張數不外洩
+    return {"0050": 1.0}  # 預設公用示範持股：0050 持有 1 張
 
 def save_local_piggy_bank(new_dict):
-    """將存錢筒同時存入瀏覽器與伺服器"""
+    """將存錢筒存入訪客自己的瀏覽器（100% 本地隱私，絕不備份至伺服器）"""
     try:
         localS.setItem("my_piggy_bank_local", new_dict)
     except Exception:
         pass
-    storage.save_piggy_bank(new_dict)
+    # ❌ 徹底移除 storage.save_piggy_bank(new_dict) 呼叫，不再往雲端硬碟寫入資料
 
 # ==================== 側邊欄公告檔案讀寫輔助函數 ====================
 ANNOUNCEMENT_FILE = "announcement.json"
@@ -61,7 +63,7 @@ def load_announcement():
     """載入側邊欄公告"""
     if not os.path.exists(ANNOUNCEMENT_FILE):
         return {
-            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
+            "content": "歡迎造訪台股選股工具！",
             "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
         }
     try:
@@ -109,7 +111,7 @@ def create_yf_session():
     """
     捨棄在 Windows 多線程極不穩定的 curl_cffi，
     改用 100% 安全、不當機的標準純 Python requests Session。
-    配備 Chrome 偽裝標頭，完美防止 Yahoo 429 阻擋！
+    配備 Chrome 偽裝標頭，防止 Yahoo 429 阻擋！
     """
     import requests as std_requests
     session = std_requests.Session()
@@ -281,7 +283,7 @@ st.sidebar.markdown(
 )
 
 # ==================== 頁首資訊 ====================
-st.title("台股三大法人飆股選股工具")
+st.title("台股三大法人飆股選股工具 by Kelly")
 
 # 載入即時台幣匯率與集保資料日期
 twd_str = data_fetcher.fetch_twd_data()
@@ -305,7 +307,7 @@ with tab1:
         col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.5, 2.5])
         
         with col_cfg1:
-            days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
+            days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
             
         with col_cfg2:
             # SaaS 科技感多選標籤 (Pills)
@@ -342,7 +344,7 @@ with tab1:
             selected_techs = st.multiselect(
                 "指標進階過濾 (可複選)：",
                 options=tech_options,
-                default=["日線多頭排列", "量能突破 (爆量 2x)"]
+                default=["日線多頭排列", "日線 MACD金叉", "量能突破 (爆量 2x)"]
             )
             filter_ma = "日線多頭排列" in selected_techs
             filter_macd = "日線 MACD金叉" in selected_techs
@@ -895,7 +897,6 @@ with tab2:
                                     latest_a_eps_val_tab2 = "N/A"
                             else:
                                 latest_q_eps_val_tab2 = "N/A"
-                                
                                 latest_a_eps_val_tab2 = "N/A"
                         except:
                             latest_q_eps_val_tab2 = "N/A"
@@ -1166,15 +1167,27 @@ with tab4:
     col_p1, col_p2 = st.columns([1, 3])
     with col_p1:
         p_code = st.text_input("ETF 代號：", max_chars=6, key="pb_c")
-        p_shares = st.number_input("持有張數：", min_value=0.1, step=0.5, format="%.1f")
+        
+        # 💡 水平排列 張數 與 股數，讓零股族非常直覺輸入
+        col_z_in, col_g_in = st.columns(2)
+        with col_z_in:
+            p_zhang = st.number_input("持有張數：", min_value=0, step=1, value=0, key="pb_z_val")
+        with col_g_in:
+            p_gu = st.number_input("零股股數：", min_value=0, max_value=999, step=1, value=0, key="pb_g_val")
+            
         if st.button("更新持股"):  # 商用版：移除表情符號
             if p_code:
                 p_code = p_code.upper().strip()
-                piggy_bank_data[p_code] = p_shares
-                save_local_piggy_bank(piggy_bank_data)
-                st.success(f"持股已更新：{p_code} {p_shares}張")
-                time.sleep(0.5)
-                st.rerun()
+                # 換算為總張數 (浮點數) 存入本地 LocalStorage，維持完全相容性
+                total_shares = (p_zhang * 1000 + p_gu) / 1000.0
+                if total_shares <= 0:
+                    st.warning("請輸入有效的張數或股數！")
+                else:
+                    piggy_bank_data[p_code] = total_shares
+                    save_local_piggy_bank(piggy_bank_data)
+                    st.success(f"持股已更新：{p_code} {p_zhang}張 {p_gu}股 (共 {total_shares} 張)")
+                    time.sleep(0.5)
+                    st.rerun()
                 
         p_del = st.text_input("要移除的代號：", max_chars=6, key="pb_del")
         if st.button("移除持股"):  # 商用版：移除表情符號
@@ -1201,8 +1214,18 @@ with tab4:
                 latest_div_value = data.get("latest_div_value", 0.0)
                 ex_date_str = data.get("ex_date", "N/A")
                 
-                est_annual = shares * 1000 * current_year_sum_val
-                market_val = shares * 1000 * price
+                # 💡 精密換算實際股數與呈現規格
+                total_gu = int(round(shares * 1000))
+                display_zhang = total_gu // 1000
+                display_gu = total_gu % 1000
+                
+                if display_gu > 0:
+                    shares_str = f"{display_zhang} 張 {display_gu} 股"
+                else:
+                    shares_str = f"{display_zhang} 張"
+                
+                est_annual = total_gu * current_year_sum_val
+                market_val = total_gu * price
                 
                 total_market_value += market_val
                 total_annual_dividend += est_annual
@@ -1219,11 +1242,12 @@ with tab4:
                     
                 # 比對是否與日曆顯示的年月份相同
                 if ex_month == st.session_state.cal_month and ex_year == st.session_state.cal_year:
-                    total_selected_month_dividend += shares * 1000 * latest_div_value
+                    total_selected_month_dividend += total_gu * latest_div_value
                 
                 pb_rows.append({
                     "代號": code,
-                    "持股張數": f"{shares} 張",
+                    "持股規格": shares_str,
+                    "總股數": f"{total_gu:,} 股",
                     "現價": f"{round(price, 1)} 元",
                     "預估單股年配息": f"{current_year_sum_val} 元",
                     "預估年領股息": f"{int(est_annual):,} 元",
