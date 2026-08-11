@@ -463,9 +463,9 @@ with tab1:
                             filtered_summary[col_dealer].abs() / 1000 + 
                             filtered_summary['融資_餘額'] / 10.0
                         )
-                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(80)
+                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(100)
                     else:
-                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(50)
+                        top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(100)
                     
                     # 逐檔 analysis 多週期與技術面指標
                     final_rows = []
