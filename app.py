@@ -281,7 +281,7 @@ st.sidebar.markdown(
 )
 
 # ==================== 頁首資訊 ====================
-st.title("台股三大法人飆股選股工具 by Kelly")
+st.title("台股三大法人飆股選股工具")
 
 # 載入即時台幣匯率與集保資料日期
 twd_str = data_fetcher.fetch_twd_data()
