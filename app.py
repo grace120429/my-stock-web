@@ -386,7 +386,7 @@ with tab1:
                 
                 for d_str in sorted_dates:
                     temp_margin = data_fetcher.fetch_all_margin(d_str)
-                    if temp_margin:  # 只要獲取到有效（非空）資料，即代表該日數據有效
+                    if temp_margin:  # 只要獲取到有效（非空）資料，即代表該日資料有效
                         margin_data = temp_margin
                         margin_date_used = d_str
                         # 如果採用的不是列表中最新的一天，標記為已啟用回溯
@@ -687,6 +687,22 @@ with tab1:
                             prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
                             pct_change = ((price - prev_price) / prev_price) * 100
                             
+                            # 💡 核心優化：計算各選定主力分點的「預估淨買超張數」與「金額」並整合成明細字串
+                            broker_details_list = []
+                            if b_active and selected_broker_names:
+                                for b_name in selected_broker_names:
+                                    b_data = multi_broker_data.get(b_name, {})
+                                    if code in b_data:
+                                        net_buy_wan = b_data[code]["diff"]
+                                        # 預估張數 = (金額萬 * 10,000) / (收盤價 * 1,000) = (金額萬 * 10) / 收盤價
+                                        est_shares = int(round((net_buy_wan * 10) / price)) if price > 0 else 0
+                                        # 簡化分點顯示名稱 (例如: "摩根大通 (外資大行)" -> "摩根大通")
+                                        short_b_name = b_name.split(" ")[0]
+                                        broker_details_list.append(f"{short_b_name}: {est_shares}張 ({net_buy_wan}萬)")
+                            
+                            broker_details_str = " | ".join(broker_details_list) if broker_details_list else "無"
+                            
+                            # 👈 核心重整：依照關聯性重新組合欄位順序，並加入新設計的「分點買超明細」欄位
                             final_rows.append({
                                 "代號": code,
                                 "股票名稱": name,
@@ -698,6 +714,7 @@ with tab1:
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
+                                "分點買超明細": broker_details_str,  # 👈 新增的主力分點明細資訊 (支援 Hover Tooltip 完整顯示)
                                 "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),
                                 "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
                                 "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
@@ -723,7 +740,7 @@ with tab1:
         if len(st.session_state.tab1_results) > 0:
             df_res = pd.DataFrame(st.session_state.tab1_results)
             
-            # 💡 核心優化：動態格式化並呈現當前所採用的融資數據日期與回溯備註
+            # 動態格式化並呈現當前所採用的融資數據日期與回溯備註
             if st.session_state.margin_date_used:
                 d_str = st.session_state.margin_date_used
                 try:
@@ -736,7 +753,7 @@ with tab1:
                 else:
                     st.caption(f"📊 融資數據基準日：{formatted_margin_date}")
             
-            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：您可以直接在下方表格最左側進行多選，將選中的股票一鍵加入自選股。)")
+            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：滑鼠懸浮在「分點買超明細」儲存格上方，可自動彈出完整券商買量明細！)")
             
             # 啟用列選取功能 (selection_mode="multi-row")
             event = st.dataframe(
