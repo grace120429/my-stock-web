@@ -301,44 +301,50 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.subheader("核心篩選與指標過濾")
     
-    # 用 columns 將設定元件橫向排開，類似原 Tkinter 的排版
-    col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.2, 2.2])
-    
-    with col_cfg1:
-        days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
+    # 使用高質感的邊框卡片容器包裹篩選條件
+    with st.container(border=True):
+        col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.5, 2.5])
         
-    with col_cfg2:
-        st.write("核心籌碼與信用篩選：")
-        col_m1, col_m2, col_m3, col_m4, col_m5, col_m6, col_m7 = st.columns(7)
-        f_active = col_m1.checkbox("外資", value=True)
-        t_active = col_m2.checkbox("投信", value=False)
-        d_active = col_m3.checkbox("自營商", value=True)
-        
-        # 為融資餘額勾選框加上懸停提示
-        m_active = col_m4.checkbox(
-            "融資 (資增)", 
-            value=True,
-            help="⚠️ 提示：每日最新融資變動數據，需等待證交所於 21:00 ~ 22:00 結算完畢後始可下載更新。"
-        )
-        m_balance_active = col_m5.checkbox(
-            "融資 (餘額最高)", 
-            value=False,
-            help="⚠️ 提示：每日最新融資餘額數據，需等待證交所於 21:00 ~ 22:00 結算完畢後始可下載更新。"
-        )
-        eps_surge_active = col_m6.checkbox("EPS 暴增", value=False)  # 核心選股
-        b_active = col_m7.checkbox("分點券商", value=False)
-        
-        # 動態載入自訂分點下拉選單
-        brokers_dict = storage.load_custom_brokers()
-        selected_broker_name = st.selectbox("選定主力分點：", list(brokers_dict.keys()), index=0)
+        with col_cfg1:
+            days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 30, 60, 120], index=2, key="tab1_days")
+            
+        with col_cfg2:
+            # 💡 重大美化：改用精美的多選 Pills 標籤，解決原本單選勾選框垂直折行的難看問題！
+            chip_options = ["外資", "投信", "自營商", "融資 (資增)", "融資 (餘額最高)", "EPS 暴增", "分點券商"]
+            selected_chips = st.multiselect(
+                "核心籌碼與信用篩選 (可複選)：",
+                options=chip_options,
+                default=["外資", "自營商", "融資 (資增)"],
+                help="⚠️ 提示：融資餘額數據於每日 21:00~22:00 結算，建議 22:00 後篩選以取得當日最新數據。"
+            )
+            # 映射多選值為原先的布林變數
+            f_active = "外資" in selected_chips
+            t_active = "投信" in selected_chips
+            d_active = "自營商" in selected_chips
+            m_active = "融資 (資增)" in selected_chips
+            m_balance_active = "融資 (餘額最高)" in selected_chips
+            eps_surge_active = "EPS 暴增" in selected_chips
+            b_active = "分點券商" in selected_chips
+            
+            # 動態載入自訂分點下拉選單（只有在選取了「分點券商」時才會優雅彈出，節省空間！）
+            brokers_dict = storage.load_custom_brokers()
+            if b_active:
+                selected_broker_name = st.selectbox("選定主力分點：", list(brokers_dict.keys()), index=0)
+            else:
+                selected_broker_name = list(brokers_dict.keys())[0] if brokers_dict else ""
 
-    with col_cfg3:
-        st.write("指標進階過濾：")
-        col_f1, col_f2, col_f3 = st.columns(3)
-        filter_ma = col_f1.checkbox("日線多頭排列", value=True)
-        filter_macd = col_f2.checkbox("日線 MACD金叉", value=True)
-        filter_rev = col_f3.checkbox("月營收雙增", value=False)
-        filter_vol = st.checkbox("量能突破 (爆量 2x)", value=True)
+        with col_cfg3:
+            # 技術指標也同步改造成精美的多選 Pills 標籤
+            tech_options = ["日線多頭排列", "日線 MACD金叉", "月營收雙增", "量能突破 (爆量 2x)"]
+            selected_techs = st.multiselect(
+                "指標進階過濾 (可複選)：",
+                options=tech_options,
+                default=["日線多頭排列", "日線 MACD金叉", "量能突破 (爆量 2x)"]
+            )
+            filter_ma = "日線多頭排列" in selected_techs
+            filter_macd = "日線 MACD金叉" in selected_techs
+            filter_rev = "月營收雙增" in selected_techs
+            filter_vol = "量能突破 (爆量 2x)" in selected_techs
 
     # 執行篩選
     st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。")
@@ -426,8 +432,8 @@ with tab1:
                 filtered_summary['排序得分'] = 0.0
                 
                 # 安全阻攔機制
-                if not (f_active or t_active or d_active or m_active or m_balance_active or eps_surge_active or b_active):
-                    st.warning("請至少勾選一個核心篩選指標！")
+                if not selected_chips:
+                    st.warning("請至少選取一個核心篩選指標！")
                     st.session_state.tab1_results = None
                 else:
                     if f_active:
