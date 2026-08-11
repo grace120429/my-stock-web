@@ -764,7 +764,7 @@ with tab2:
                 
     # ==================== 下方：全螢幕寬度的數據表格區 ====================
     st.write("---")
-    st.markdown("### 自選股雙週期趨勢與警示看板")
+    st.markdown("### 自選股趨勢與警示看板")
     
     col_refresh, col_codes = st.columns([1, 4])
     with col_refresh:
