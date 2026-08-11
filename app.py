@@ -339,7 +339,7 @@ with tab1:
             selected_techs = st.multiselect(
                 "指標進階過濾 (可複選)：",
                 options=tech_options,
-                default=["日線多頭排列", "日線 MACD金叉", "量能突破 (爆量 2x)"]
+                default=["日線多頭排列", "量能突破 (爆量 2x)"]
             )
             filter_ma = "日線多頭排列" in selected_techs
             filter_macd = "日線 MACD金叉" in selected_techs
