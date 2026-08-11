@@ -315,7 +315,7 @@ with tab1:
             selected_chips = st.multiselect(
                 "核心籌碼與信用篩選 (可複選)：",
                 options=chip_options,
-                default=["外資", "自營商", "融資 (資增)"],
+                default=["外資", "自營商"],
                 help="⚠️ 提示：融資餘額數據於每日 21:00~22:00 結算，建議 22:00 後篩選以取得當日最新數據。"
             )
             # 映射多選值為原先的布林變數
@@ -344,7 +344,7 @@ with tab1:
             selected_techs = st.multiselect(
                 "指標進階過濾 (可複選)：",
                 options=tech_options,
-                default=["日線多頭排列", "日線 MACD金叉", "量能突破 (爆量 2x)"]
+                default=["量能突破 (爆量 2x)"]
             )
             filter_ma = "日線多頭排列" in selected_techs
             filter_macd = "日線 MACD金叉" in selected_techs
