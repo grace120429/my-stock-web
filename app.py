@@ -80,6 +80,61 @@ def save_announcement(data):
     except Exception as e:
         st.error(f"儲存公告失敗: {e}")
 
+# ==================== 💡 新增：一鍵解析全台所有分點 Top 10 買賣超爬蟲 (獨立於 app.py) ====================
+def fetch_stock_top_brokers_local(code, days=5):
+    """
+    爬取指定個股全台「買超」與「賣超」前 10 名的非自選分點券商排行
+    """
+    from bs4 import BeautifulSoup
+    from data_fetcher import unsafe_session  # 沿用專案中的連線 Session 繞過限制
+    
+    days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 20: 20}
+    d_param = days_map.get(days, 5)
+    
+    url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={code}&e=&f=&d={d_param}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    buyers = []
+    sellers = []
+    
+    try:
+        res = unsafe_session.get(url, headers=headers, timeout=8)
+        if res.status_code == 200:
+            html = res.content.decode('big5', errors='ignore')
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            rows = soup.find_all('tr')
+            for row in rows:
+                tds = row.find_all('td')
+                # 左右分流表格解析
+                if len(tds) >= 10:
+                    b_name = tds[0].text.strip()
+                    b_net = tds[3].text.strip().replace(',', '')  # 淨買超張數
+                    
+                    s_name = tds[5].text.strip()
+                    s_net = tds[8].text.strip().replace(',', '')  # 淨賣超張數
+                    
+                    # 過濾雜訊
+                    try:
+                        b_val = int(b_net)
+                        if b_val > 0 and b_name and "券商" not in b_name and "買超" not in b_name:
+                            buyers.append({"券商分點": b_name, "淨買超(張)": b_val})
+                    except ValueError:
+                        pass
+                        
+                    try:
+                        s_val = int(s_net)
+                        if s_val > 0 and s_name and "券商" not in s_name and "賣超" not in s_name:
+                            sellers.append({"券商分點": s_name, "淨賣超(張)": s_val})
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+        
+    return buyers[:10], sellers[:10]
+
 # ==================== 頁面基本設定 ====================
 st.set_page_config(layout="wide", page_title="台股三大法人飆股選股工具")
 
@@ -115,7 +170,6 @@ if "margin_is_fallback" not in st.session_state:
 # ==================== 100% 執行緒安全防阻擋連線產生器 ====================
 def create_yf_session():
     """
-    捨棄在 Windows 多線程極不穩定的 curl_cffi，
     改用 100% 安全、不當機的標準純 Python requests Session。
     配備 Chrome 偽裝標頭，防止 Yahoo 429 阻擋！
     """
@@ -177,7 +231,7 @@ def save_announcement(data):
 # ==================== 網頁專用精美 HTML 除息行事曆渲染器 ====================
 def render_streamlit_calendar(year, month, events):
     """
-    利用純 HTML 渲染除息行事曆，支援瀏覽器原生 Tooltip 浮動提示 (商用無Emoji精簡版)
+    利用純 HTML 渲染除息行事曆，支援瀏覽器原生 Tooltip 浮動提示
     """
     import calendar
     cal = calendar.Calendar(calendar.SUNDAY)
@@ -229,11 +283,9 @@ def get_eps_from_stmt(stmt):
     """
     if stmt is None or stmt.empty:
         return None
-    # 遍歷常見的雅虎財報 EPS 欄位名稱
     for key in ['Basic EPS', 'Diluted EPS', 'BasicEarningsPerShare', 'DilutedEarningsPerShare', 'Basic', 'Diluted']:
         if key in stmt.index:
             return stmt.loc[key]
-    # 模糊比對
     for idx in stmt.index:
         if "EPS" in str(idx) or "Earnings Per Share" in str(idx):
             return stmt.loc[idx]
@@ -289,10 +341,6 @@ st.sidebar.markdown(
 )
 
 # ==================== 頁首資訊 ====================
-st.title("台股三大法人飆股選股工具 by Kelly")
-
-# 載入即時台幣匯率與集保資料日期
-twd_str = data_fetcher.fetch_twd_data()
 st.info(f"{twd_str}")
 
 # ==================== 建立五大分頁 ====================
@@ -308,15 +356,13 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.subheader("核心篩選與指標過濾")
     
-    # 使用高質感的邊框卡片容器包裹篩選條件
     with st.container(border=True):
         col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.5, 2.5])
         
         with col_cfg1:
-            days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=0, key="tab1_days")
+            days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 30, 60, 120], index=0, key="tab1_days")
             
         with col_cfg2:
-            # SaaS 科技感多選標籤 (Pills)
             chip_options = ["外資", "投信", "自營商", "融資 (資增)", "融資 (餘額最高)", "EPS 暴增", "分點券商"]
             selected_chips = st.multiselect(
                 "核心籌碼與信用篩選 (可複選)：",
@@ -324,7 +370,6 @@ with tab1:
                 default=["外資", "自營商"],
                 help="⚠️ 提示：融資餘額數據於每日 21:00~22:00 結算，建議 22:00 後篩選以取得當日最新數據。"
             )
-            # 映射多選值為原先的布林變數
             f_active = "外資" in selected_chips
             t_active = "投信" in selected_chips
             d_active = "自營商" in selected_chips
@@ -333,7 +378,6 @@ with tab1:
             eps_surge_active = "EPS 暴增" in selected_chips
             b_active = "分點券商" in selected_chips
             
-            # 💡 核心升級：若選取「分點券商」，改用「多選標籤（st.multiselect）」以支援多重主力交集功能！
             brokers_dict = storage.load_custom_brokers()
             if b_active:
                 selected_broker_names = st.multiselect(
@@ -345,7 +389,6 @@ with tab1:
                 selected_broker_names = []
 
         with col_cfg3:
-            # 技術指標也同步改造成精美的多選 Pills 標籤
             tech_options = ["日線多頭排列", "日線 MACD金叉", "月營收雙增", "量能突破 (爆量 2x)"]
             selected_techs = st.multiselect(
                 "指標進階過濾 (可複選)：",
@@ -357,11 +400,9 @@ with tab1:
             filter_rev = "月營收雙增" in selected_techs
             filter_vol = "量能突破 (爆量 2x)" in selected_techs
 
-    # 執行篩選
     st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。若勾選多個分點取交集，下載時間可能會增加數秒。")
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
         with st.spinner("正在進行大數據分析，請稍候..."):
-            # 1. 抓取三大法人數據
             dfs, t86_dates = data_fetcher.get_recent_data(days_count=days_count)
             if not dfs:
                 st.error("無法自證交所取得資料。")
@@ -369,42 +410,36 @@ with tab1:
             else:
                 raw_data = pd.concat(dfs, ignore_index=True)
                 
-                # 2. 獲取集保大戶資料
                 tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
                 if tdcc_raw and tdcc_date:
                     tdcc_ratios, tdcc_changes, _ = storage.save_and_get_tdcc_change(tdcc_raw, tdcc_date)
                 else:
                     tdcc_ratios, tdcc_changes = {}, {}
                 
-                # 💡 3. 背景獲取融資數據（新增自動往前回溯的自癒機制）
+                # 💡 背景獲取融資數據（自動往前回溯的自癒機制）
                 margin_data = {}
                 margin_date_used = ""
                 st.session_state.margin_is_fallback = False
                 
-                # 依日期由新到舊排序
                 sorted_dates = sorted(t86_dates, reverse=True) if t86_dates else []
                 
                 for d_str in sorted_dates:
                     temp_margin = data_fetcher.fetch_all_margin(d_str)
-                    if temp_margin:  # 只要獲取到有效（非空）資料，即代表該日資料有效
+                    if temp_margin:
                         margin_data = temp_margin
                         margin_date_used = d_str
-                        # 如果採用的不是列表中最新的一天，標記為已啟用回溯
                         if d_str != sorted_dates[0]:
                             st.session_state.margin_is_fallback = True
                         break
-                    time.sleep(0.2)  # 微小等待，防連線過於頻繁被阻擋
+                    time.sleep(0.2)
                 
                 if not margin_date_used and sorted_dates:
                     margin_date_used = sorted_dates[0]
                 
-                # 寫入 Session State 中，確保 Rerun 時資料不失真
                 st.session_state.margin_date_used = margin_date_used
                 
-                # 4. 下載月營收
                 revenue_data = data_fetcher.fetch_monthly_revenue()
                 
-                # 💡 5. 多分點主力券商數據抓取（支援取交集）
                 multi_broker_data = {}
                 if b_active and selected_broker_names:
                     days_param = 5 if days_count <= 7 else 20
@@ -412,12 +447,10 @@ with tab1:
                         broker_id = brokers_dict.get(b_name)
                         if broker_id:
                             broker_results = data_fetcher.fetch_broker_net_buys(broker_id, days_param)
-                            # 僅篩選並保留該分點淨買超金額大於 0 的個股數據
                             multi_broker_data[b_name] = {
                                 code: item for code, item in broker_results.items() if item["diff"] > 0
                             }
 
-                # 建立多重券商交集判定輔助函數
                 def check_broker_intersection(code):
                     if not b_active or not selected_broker_names:
                         return True, 0.0
@@ -426,16 +459,13 @@ with tab1:
                     for b_name in selected_broker_names:
                         b_data = multi_broker_data.get(b_name, {})
                         if code not in b_data:
-                            # 只要其中有一個選取的分點沒有買入，就淘汰
                             return False, 0.0
                         total_diff += b_data[code]["diff"]
                     return True, total_diff
 
-                # --- 篩選與計算邏輯 ---
                 combined = raw_data.copy()
                 combined = combined[combined['證券代號'].str.match(r'^[a-zA-Z0-9]{4,6}$')]
                 
-                # 復原原本最完整的欄位備用匹配演算法
                 col_foreign, col_trust, col_dealer = None, None, None
                 for c in combined.columns:
                     if "外陸資買賣超股數(不含外資自營商)" == c: col_foreign = c
@@ -476,9 +506,8 @@ with tab1:
                 summary['投信_張'] = summary[col_trust] / 1000 if col_trust else 0
                 summary['自營_張'] = summary[col_dealer] / 1000 if col_dealer else 0
                 summary['融資_張'] = summary['證券代號'].apply(lambda c: margin_data.get(c, {}).get("change", 0.0))
-                summary['融資_餘額'] = summary['證券代號'].apply(lambda c: margin_data.get(c, {}).get("today", 0.0))  # 映射融資總餘額
+                summary['融資_餘額'] = summary['證券代號'].apply(lambda c: margin_data.get(c, {}).get("today", 0.0))
                 
-                # 💡 運算主力多重交集與分數累加
                 summary['券商符合交集'] = True
                 summary['分點_萬'] = 0.0
                 if b_active and selected_broker_names:
@@ -489,7 +518,6 @@ with tab1:
                 filtered_summary = summary.copy()
                 filtered_summary['排序得分'] = 0.0
                 
-                # 安全阻攔機制
                 if not selected_chips:
                     st.warning("請至少選取一個核心篩選指標！")
                     st.session_state.tab1_results = None
@@ -510,11 +538,9 @@ with tab1:
                         filtered_summary = filtered_summary[filtered_summary['融資_餘額'] > 0]
                         filtered_summary['排序得分'] += filtered_summary['融資_餘額']
                     if b_active:
-                        # 必須同時存在於所有選取主力券商的買超名單中（交集）
                         filtered_summary = filtered_summary[filtered_summary['券商符合交集'] == True]
                         filtered_summary['排序得分'] += filtered_summary['分點_萬']
                     
-                    # 核心選股：如果「完全不勾三大法人與信用融資」，只勾選「EPS 暴增」進行獨立選股
                     if eps_surge_active and not (f_active or t_active or d_active or m_active or m_balance_active or b_active):
                         filtered_summary['排序得分'] = (
                             filtered_summary[col_foreign].abs() / 1000 + 
@@ -526,10 +552,7 @@ with tab1:
                     else:
                         top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(50)
                     
-                    # 逐檔 analysis 多週期與技術面指標
                     final_rows = []
-                    
-                    # 建立安全獨立的 yf_session
                     yf_session = create_yf_session()
                     
                     for _, row_item in top_candidates.iterrows():
@@ -537,16 +560,12 @@ with tab1:
                         name = row_item['證券名稱']
                         ticker = f"{code}.TW"
                         
-                        # 營收篩選
                         rev_item = revenue_data.get(code)
                         if filter_rev:
                             if not rev_item or rev_item.get("yoy", 0) <= 0 or rev_item.get("mom", 0) <= 0:
                                 continue
                         
-                        # 智慧型提示初始化
                         is_code_etf = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
-                        
-                        # 智慧過濾：如果啟用了「EPS 暴增」核心選股，而個股是 ETF，直接淘汰跳過（省去下載財報時間）
                         if eps_surge_active and is_code_etf:
                             continue
                         
@@ -554,12 +573,9 @@ with tab1:
                         latest_a_eps_val = "ETF無EPS" if is_code_etf else "載入中..."
                         
                         try:
-                            time.sleep(0.15)  # 禮貌防阻擋安全等待
-                            
-                            # 無條件建立 stock 對象
+                            time.sleep(0.15)
                             stock = yf.Ticker(ticker, session=yf_session)
                             
-                            # 使用 Session State 做為 K 線資料快取
                             if ticker in st.session_state.yf_cache:
                                 hist = st.session_state.yf_cache[ticker]
                             else:
@@ -570,7 +586,6 @@ with tab1:
                             if hist.empty or len(hist) < 20:
                                 continue
                                 
-                            # 核心修改：不論有沒有勾選過濾，只要是非 ETF 股票，一律下載並顯示真實的 EPS 數據！
                             if not is_code_etf:
                                 try:
                                     q_stmt = stock.quarterly_income_stmt
@@ -582,12 +597,9 @@ with tab1:
                                 a_eps_series = get_eps_from_stmt(a_stmt)
                                 if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                     latest_q_eps = q_eps_series.iloc[0]
-                                    
-                                    # 計算最新單季所在的季度標記 (例如 2025Q3)
                                     q_date = q_eps_series.index[0]
                                     q_str = get_quarter_str(q_date)
                                     
-                                    # 抓取「去年年度EPS」
                                     target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
                                     a_eps_val = None
                                     a_eps_year = None
@@ -600,7 +612,6 @@ with tab1:
                                                 break
                                         except:
                                             pass
-                                    # 備用方案：若去年年報未發布，則採用第一筆(最新一筆)年報資料
                                     if a_eps_val is None:
                                         try:
                                             first_date = a_eps_series.index[0]
@@ -614,18 +625,16 @@ with tab1:
                                         latest_q_eps_val = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
                                         latest_a_eps_val = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
                                         
-                                        # 核心過濾：如果啟用了「EPS 暴增」核心選股，而個股「季 EPS <= 最新年報 EPS」，則直接淘汰
                                         latest_a_eps = a_eps_series.iloc[0]
                                         if eps_surge_active and latest_q_eps <= latest_a_eps:
                                             continue
                                     else:
                                         if eps_surge_active:
-                                            continue  # 數據缺值，淘汰
+                                            continue
                                 else:
                                     if eps_surge_active:
-                                        continue  # 財報無資訊，淘汰
+                                        continue
                                 
-                            # 計算均線
                             hist['MA5'] = hist['Close'].rolling(5).mean()
                             hist['MA20'] = hist['Close'].rolling(20).mean()
                             latest = hist.iloc[-1]
@@ -634,7 +643,6 @@ with tab1:
                             ma5 = latest['MA5']
                             ma20 = latest['MA20']
                             
-                            # 量能突破計算
                             latest_vol = latest['Volume']
                             prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
                             vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
@@ -646,11 +654,9 @@ with tab1:
                             if filter_ma and not is_bullish:
                                 continue
                                 
-                            # 量能格式化
                             vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
                             ma_status_display = f"{ma_status} ({vol_status_str})"
                             
-                            # MACD 計算 (台股常規：空頭時以綠色 🟢 表示警告，多頭時以紅色 🔴 表示)
                             latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
                             raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                             
@@ -662,7 +668,6 @@ with tab1:
                             if filter_macd and "MACD金叉" not in macd_daily_status and "多頭" not in macd_daily_status:
                                 continue
                                 
-                            # 60分K MACD
                             try:
                                 if ticker in st.session_state.yf_60m_cache:
                                     hist_60m = st.session_state.yf_60m_cache[ticker]
@@ -681,28 +686,23 @@ with tab1:
                             except:
                                 macd_60m_status = "N/A"
                                 
-                            # 支撐壓力點
                             sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
-                            
                             prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
                             pct_change = ((price - prev_price) / prev_price) * 100
                             
-                            # 💡 核心優化：計算各選定主力分點的「預估淨買超張數」與「金額」並整合成明細字串
+                            # 💡 核心優化：計算選取分點的預估張數與金額
                             broker_details_list = []
                             if b_active and selected_broker_names:
                                 for b_name in selected_broker_names:
                                     b_data = multi_broker_data.get(b_name, {})
                                     if code in b_data:
                                         net_buy_wan = b_data[code]["diff"]
-                                        # 預估張數 = (金額萬 * 10,000) / (收盤價 * 1,000) = (金額萬 * 10) / 收盤價
                                         est_shares = int(round((net_buy_wan * 10) / price)) if price > 0 else 0
-                                        # 簡化分點顯示名稱 (例如: "摩根大通 (外資大行)" -> "摩根大通")
                                         short_b_name = b_name.split(" ")[0]
                                         broker_details_list.append(f"{short_b_name}: {est_shares}張 ({net_buy_wan}萬)")
                             
                             broker_details_str = " | ".join(broker_details_list) if broker_details_list else "無"
                             
-                            # 👈 依照關聯性重新組合欄位順序，並加入主力分點明細資料到背景物件中
                             final_rows.append({
                                 "代號": code,
                                 "股票名稱": name,
@@ -714,7 +714,7 @@ with tab1:
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
-                                "分點買超明細": broker_details_str,  # 💡 隱藏明細，只在下方勾選時動態渲染成漂亮的儀表板卡片
+                                "分點買超明細": broker_details_str,  # 隱藏此列，改由下方動態指標卡呈現
                                 "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),
                                 "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
                                 "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
@@ -729,18 +729,16 @@ with tab1:
                             continue
                             
                 if final_rows:
-                    # 將成功篩選出的名單寫入記憶體中
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
                     st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
 
-    # 將大數據篩選的結果表格移到按鈕區塊外（保證勾選時不消失）
+    # 顯示過濾後的數據結果
     if st.session_state.tab1_results is not None:
         if len(st.session_state.tab1_results) > 0:
             df_res = pd.DataFrame(st.session_state.tab1_results)
             
-            # 動態格式化並呈現當前所採用的融資數據日期與回溯備註
             if st.session_state.margin_date_used:
                 d_str = st.session_state.margin_date_used
                 try:
@@ -753,12 +751,11 @@ with tab1:
                 else:
                     st.caption(f"📊 融資數據基準日：{formatted_margin_date}")
             
-            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：勾選下方表格最左側的股票，可在下方即時查看該股的『主力分點進出卡片』與一鍵加入自選。)")
+            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：勾選下方表格最左側的股票，可在下方即時查看該股的『主力分點進出卡片與全台排行』！)")
             
-            # 💡 核心優化：建立僅用於顯示的 DataFrame，排除「分點買超明細」以節省儲存格空間
+            # 💡 隱藏大數據中的「分點買超明細」文字，不佔用儲存格空間
             visible_cols = [c for c in df_res.columns if c != "分點買超明細"]
             
-            # 啟用列選取功能 (selection_mode="multi-row")
             event = st.dataframe(
                 df_res[visible_cols], 
                 column_config={
@@ -773,7 +770,7 @@ with tab1:
             # 偵測並讀取使用者選取的行數
             selected_rows = event.selection.rows
             if selected_rows:
-                # 💡 核心優化：當使用者在主表格勾選行數時，於下方動態以高質感 Metric 儀表板卡片呈現買超明細 💡
+                # 💡 核心升級一：動態呈現自選分點買超明細儀表板 (Metrics)
                 st.write("---")
                 st.markdown("### 🎯 已選個股 - 主力分點進出特寫")
                 for idx in selected_rows:
@@ -784,21 +781,44 @@ with tab1:
                     
                     with st.container(border=True):
                         st.markdown(f"**📍 {code} {name}**")
+                        
+                        st.markdown("**📌 我的自選主力進出：**")
                         if details and details != "無":
                             detail_items = details.split(" | ")
-                            # 為了防版面過度拉伸，欄位數至少為 4 欄
                             cols = st.columns(max(len(detail_items), 4))
                             for i, item in enumerate(detail_items):
                                 try:
-                                    # 解析 "摩根大通: 133張 (508.1萬)" -> "摩根大通" 與 "133張 (508.1萬)"
                                     parts = item.split(": ")
-                                    broker_name = parts[0]
-                                    shares_and_money = parts[1]
-                                    cols[i].metric(label=broker_name, value=shares_and_money)
-                                except Exception:
+                                    cols[i].metric(label=parts[0], value=parts[1])
+                                except:
                                     cols[i].write(item)
                         else:
-                            st.caption("未選取分點，或該股無符合條件之分點買超明細。")
+                            st.caption("自選分點在此股無符合之買超紀錄。")
+                        
+                        # 💡 核心升級二：不限自選！動態調閱全台灣所有分點 Top 10 排行表
+                        st.write("")
+                        st.markdown("**🔥 全台所有分點 - 買賣超前 10 名排行 (不設限自選)：**")
+                        with st.spinner(f"正在向系統調閱 {code} 的全台主力排行..."):
+                            all_buyers, all_sellers = fetch_stock_top_brokers_local(code, days=days_count)
+                            
+                        if all_buyers or all_sellers:
+                            col_b, col_s = st.columns(2)
+                            with col_b:
+                                st.markdown("🟢 **淨買超排行 Top 10**")
+                                df_b = pd.DataFrame(all_buyers)
+                                if not df_b.empty:
+                                    st.dataframe(df_b, use_container_width=True, hide_index=True)
+                                else:
+                                    st.caption("無買超排行資料")
+                            with col_s:
+                                st.markdown("🔴 **淨賣超排行 Top 10**")
+                                df_s = pd.DataFrame(all_sellers)
+                                if not df_s.empty:
+                                    st.dataframe(df_s, use_container_width=True, hide_index=True)
+                                else:
+                                    st.caption("無賣超排行資料")
+                        else:
+                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
                 
                 selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
                 st.write("")
@@ -823,14 +843,11 @@ with tab1:
 with tab2:
     st.subheader("觀察名單即時監控")
     
-    # 載入自選監控
     watchlist = get_local_watchlist()
     
-    # 核心優化：將原本左右分割的排版，改成精美的大型「上方水平控制卡片」
     with st.container(border=True):
         col_add, col_rem = st.columns(2)
         
-        # 左半邊：自選股新增
         with col_add:
             st.markdown("**➕ 新增自選股**")
             col_add_input, col_add_btn = st.columns([3, 1])
@@ -839,7 +856,7 @@ with tab2:
                     "輸入股票代號加入自選：", 
                     max_chars=6, 
                     key="add_w", 
-                    label_visibility="collapsed",  # 隱藏預設標籤，與按鈕完美對齊
+                    label_visibility="collapsed",
                     placeholder="請輸入台股代號 (如: 2330)"
                 )
             with col_add_btn:
@@ -855,7 +872,6 @@ with tab2:
                         else:
                             st.info(f"{new_watchlist_code} 已存在名單中。")
                             
-        # 右半邊：自選股批次移除
         with col_rem:
             st.markdown("**🗑️ 批次移除自選股**")
             if watchlist:
@@ -865,7 +881,7 @@ with tab2:
                         "選擇要移除的股票：",
                         options=watchlist,
                         default=[],
-                        label_visibility="collapsed",  # 隱藏預設標籤，與按鈕對齊
+                        label_visibility="collapsed",
                         placeholder="請選擇待刪除代號"
                     )
                 with col_rem_btn:
@@ -881,7 +897,6 @@ with tab2:
             else:
                 st.caption("目前監控清單為空。")
                 
-    # 下方：全螢幕寬度的數據表格區
     st.write("---")
     st.markdown("### 自選股雙週期趨勢與警示看板")
     
@@ -902,8 +917,6 @@ with tab2:
     if watchlist:
         w_rows = []
         errors_log_tab2 = []
-        
-        # 建立線程安全獨立 Session
         yf_session_tab2 = create_yf_session()
         
         with st.spinner("正在分析自選股趨勢與支撐壓力點，請稍候..."):
@@ -917,14 +930,12 @@ with tab2:
                 ticker = f"{code}.TW"
                 name = data_fetcher.fetch_stock_name_fast(code)
                 
-                # 智慧型提示初始化 (分頁二同步支援)
                 is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
                 latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
                 latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
                 
                 try:
-                    time.sleep(0.15)  # 安全等待
-                    
+                    time.sleep(0.15)
                     stock = yf.Ticker(ticker, session=yf_session_tab2)
                     hist = stock.history(period="6mo")
                     if hist.empty:
@@ -936,7 +947,6 @@ with tab2:
                         errors_log_tab2.append(f"{code}: 歷史K線數據不足")
                         continue
                         
-                    # 分頁二（自選監控）自動載入最新年度與單季 EPS 數據
                     if not is_code_etf_tab2:
                         try:
                             try:
@@ -949,12 +959,9 @@ with tab2:
                             a_eps_series = get_eps_from_stmt(a_stmt)
                             if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                 latest_q_eps = q_eps_series.iloc[0]
-                                
-                                # 計算最新單季所在的季度標記 (例如 2025Q3)
                                 q_date = q_eps_series.index[0]
                                 q_str = get_quarter_str(q_date)
                                 
-                                # 抓取「去年年度EPS」
                                 target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
                                 a_eps_val = None
                                 a_eps_year = None
@@ -993,7 +1000,6 @@ with tab2:
                     prev_price = hist['Close'].iloc[-2]
                     pct_change = ((price - prev_price) / prev_price) * 100
                     
-                    # MACD 與警示 (依台股常規調整色彩：空頭🟢，多頭🔴)
                     latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
                     raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                     
@@ -1002,7 +1008,6 @@ with tab2:
                     else:
                         macd_daily_status = f"🔴 {raw_macd_daily}"
                     
-                    # 60m MACD
                     try:
                         stock_60m = yf.Ticker(ticker, session=yf_session_tab2)
                         hist_60m = stock_60m.history(interval="60m", period="1mo")
@@ -1028,7 +1033,6 @@ with tab2:
                     else:
                         alert_str = "🔴 趨勢強勢 (MACD雙多)"
                     
-                    # 自選股同步運算量能突破，並拼接進狀態欄
                     latest_vol = hist['Volume'].iloc[-1]
                     prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
                     vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
@@ -1037,7 +1041,6 @@ with tab2:
                         
                     sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
                     
-                    # 依關聯性優化順序 (代號 -> 名稱 -> 價格 -> EPS -> 營收 -> 籌碼大戶 -> 技術指標)
                     w_rows.append({
                         "代號": code,
                         "股票名稱": name,
@@ -1070,17 +1073,40 @@ with tab2:
 with tab3:
     st.subheader("特寫分點主力特定天數交易明細")
     
-    # 自訂分點管理介面
+    # 自訂分點管理介面 (支援覆寫與直接刪除)
     with st.expander("管理我的自訂券商分點"):
         col_b1, col_b2 = st.columns(2)
         new_b_name = col_b1.text_input("分點名稱 (如: 凱基台北)：")
         new_b_code = col_b2.text_input("分點代號 (4碼，如: 9268)：")
         if st.button("儲存新分點"):
             if new_b_name and new_b_code:
-                brokers_dict[new_b_name] = new_b_code.lower()
+                brokers_dict[new_b_name] = new_b_code.upper() # 強制轉為大寫，避開大小寫資料庫 Bug
                 storage.save_custom_brokers(brokers_dict)
-                st.success(f"已儲存：{new_b_name} ({new_b_code})")
+                st.success(f"已儲存：{new_b_name} ({new_b_code.upper()})")
+                time.sleep(0.5)
                 st.rerun()
+                
+        st.write("---")
+        st.markdown("**🗑️ 移除現有自訂分點**")
+        col_del_select, col_del_btn = st.columns([3, 1])
+        with col_del_select:
+            del_b_name = st.selectbox(
+                "選擇要刪除的分點名稱：",
+                options=["請選擇待刪除分點"] + list(brokers_dict.keys()),
+                key="del_broker_select"
+            )
+        with col_del_btn:
+            st.write("") # 微調對齊
+            if st.button("確認刪除", type="secondary", use_container_width=True, key="btn_del_broker"):
+                if del_b_name != "請選擇待刪除分點":
+                    if del_b_name in brokers_dict:
+                        del brokers_dict[del_b_name]
+                        storage.save_custom_brokers(brokers_dict)
+                        st.success(f"已成功移除：{del_b_name}")
+                        time.sleep(0.5)
+                        st.rerun()
+                else:
+                    st.warning("請先選取要刪除的分點！")
                 
     col_q1, col_q2, col_q3 = st.columns(3)
     target_broker = col_q1.selectbox("選擇統計主力分點：", list(brokers_dict.keys()), key="broker_tab3")
@@ -1119,7 +1145,6 @@ with tab3:
 
 # ==================== 【分頁四：台灣熱門 ETF 配息與退休存錢筒】 ====================
 with tab4:
-    # 初始化日曆日期與事件儲存結構
     now_tw = datetime.now(timezone(timedelta(hours=8)))
     if "cal_year" not in st.session_state:
         st.session_state.cal_year = now_tw.year
@@ -1130,10 +1155,8 @@ with tab4:
 
     st.subheader("熱門與主動式 ETF 動態息收與殖利率看板")
     
-    # 讀取 ETF 清單
     hot_etfs = storage.load_custom_etfs()
     
-    # 建立左右兩欄佈局：左邊為 ETF 表格，右邊為除息日曆 (還原 Tkinter 右側面板排版)
     col_main_left, col_main_right = st.columns([3, 1.2])
     
     with col_main_left:
@@ -1174,10 +1197,7 @@ with tab4:
             upcoming_dict = data_fetcher.fetch_upcoming_dividends()
             etf_rows = []
             
-            # 使用線程安全的 Session
             yf_session_tab4 = create_yf_session()
-            
-            # 清空本次執年的日曆事件快取，準備重新收集
             st.session_state.etf_events = {}
             
             for code, name in hot_etfs:
@@ -1195,7 +1215,6 @@ with tab4:
                         "除息提醒狀態": data["status"].replace("🔔 ", "").replace("🔴 ", "").replace("⏳ ", "")
                     })
                     
-                    # 收集除息日期事件至行事曆快取中
                     ex_date_str = data.get("ex_date", "N/A")
                     last_amt_str = data.get("last_amount", "N/A")
                     if ex_date_str != "N/A" and "尚未公告" not in last_amt_str:
@@ -1218,7 +1237,6 @@ with tab4:
     with col_main_right:
         st.write("📅 ETF 除息行事曆")
         
-        # 建立與 Tkinter 一致的左右導航按鈕與月份標題
         col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
         with col_nav1:
             if st.button("◀", key="prev_month"):
@@ -1237,7 +1255,6 @@ with tab4:
                     st.session_state.cal_year += 1
                 st.rerun()
                 
-        # 渲染 HTML 行事曆
         html_cal = render_streamlit_calendar(
             st.session_state.cal_year, 
             st.session_state.cal_month, 
@@ -1246,7 +1263,6 @@ with tab4:
         st.markdown(html_cal, unsafe_allow_html=True)
         st.caption("提示：滑鼠懸停在紅色的除息日期上，可觀看當天除息 ETF 與金額詳情。")
 
-    # 退休配息存錢筒
     st.write("---")
     st.subheader("我的股息退休存錢筒 (複利配息計算機)")
     piggy_bank_data = get_local_piggy_bank()
@@ -1255,7 +1271,6 @@ with tab4:
     with col_p1:
         p_code = st.text_input("ETF 代號：", max_chars=6, key="pb_c")
         
-        # 💡 水平排列 張數 與 股數，讓零股族非常直覺輸入
         col_z_in, col_g_in = st.columns(2)
         with col_z_in:
             p_zhang = st.number_input("持有張數：", min_value=0, step=1, value=0, key="pb_z_val")
@@ -1265,7 +1280,6 @@ with tab4:
         if st.button("更新持股"):
             if p_code:
                 p_code = p_code.upper().strip()
-                # 換算為總張數 (浮點數) 存入本地 LocalStorage，維持完全相容性
                 total_shares = (p_zhang * 1000 + p_gu) / 1000.0
                 if total_shares <= 0:
                     st.warning("請輸入有效的張數或股數！")
@@ -1291,7 +1305,7 @@ with tab4:
         pb_rows = []
         total_market_value = 0.0
         total_annual_dividend = 0.0
-        total_selected_month_dividend = 0.0  # 該月份實際預估配息收入
+        total_selected_month_dividend = 0.0
         
         for code, shares in piggy_bank_data.items():
             data = data_fetcher.fetch_etf_dividend_details(code, upcoming_dict)
@@ -1301,7 +1315,6 @@ with tab4:
                 latest_div_value = data.get("latest_div_value", 0.0)
                 ex_date_str = data.get("ex_date", "N/A")
                 
-                # 精密換算實際股數與呈現規格
                 total_gu = int(round(shares * 1000))
                 display_zhang = total_gu // 1000
                 display_gu = total_gu % 1000
@@ -1317,7 +1330,6 @@ with tab4:
                 total_market_value += market_val
                 total_annual_dividend += est_annual
                 
-                # 計算與行事曆連動的「該月份實際除息收入」
                 ex_month = None
                 ex_year = None
                 try:
@@ -1327,7 +1339,6 @@ with tab4:
                 except:
                     pass
                     
-                # 比對是否與日曆顯示的年月份相同
                 if ex_month == st.session_state.cal_month and ex_year == st.session_state.cal_year:
                     total_selected_month_dividend += total_gu * latest_div_value
                 
@@ -1343,7 +1354,6 @@ with tab4:
         if pb_rows:
             st.dataframe(pd.DataFrame(pb_rows), use_container_width=True)
             
-            # 統計看板 (商用版：移除表情符號，並直接顯示指定月份的實質配息收入)
             col_stat1, col_stat2, col_stat3 = st.columns(3)
             col_stat1.metric("總持股市值", f"{int(total_market_value):,} 元")
             col_stat2.metric("預估年領總股息", f"{int(total_annual_dividend):,} 元")
@@ -1359,10 +1369,8 @@ with tab4:
 with tab5:
     st.subheader("💬 讀者交流留言區")
     
-    # 載入現有留言
     comments = load_comments()
     
-    # 留言發表表單
     with st.form("comment_form", clear_on_submit=True):
         col_author, col_submit = st.columns([1, 3])
         author_name = col_author.text_input("您的稱呼：", max_chars=10, value="匿名讀者")
@@ -1373,14 +1381,13 @@ with tab5:
             if not comment_content.strip():
                 st.warning("請填寫留言內容！")
             else:
-                # 建立新留言資料
                 new_comment = {
-                    "id": int(time.time() * 1000),  # 以毫秒級時間戳記做為唯一識別 ID
+                    "id": int(time.time() * 1000),
                     "time": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
                     "author": author_name.strip() if author_name.strip() else "匿名讀者",
                     "content": comment_content.strip(),
-                    "reply": "",       # 預留回復欄位
-                    "reply_time": ""   # 預留回復時間欄位
+                    "reply": "",
+                    "reply_time": ""
                 }
                 comments.append(new_comment)
                 save_comments(comments)
@@ -1394,9 +1401,7 @@ with tab5:
     if not comments:
         st.info("目前尚無留言，歡迎成為第一個留言的人！")
     else:
-        # 倒序顯示，最新發表的留言置頂
         for msg in reversed(comments):
-            # 判斷是否有管理者回覆
             reply_html = ""
             if "reply" in msg and msg["reply"]:
                 reply_time_str = f" <span style='color: gray; font-size: 11px; margin-left: 10px;'>({msg.get('reply_time', '')})</span>" if msg.get('reply_time') else ""
@@ -1419,17 +1424,13 @@ with tab5:
                 unsafe_allow_html=True
             )
             
-    # ==================== 後台管理與回復區 ====================
     st.write("---")
     with st.expander("🛠️ 留言板後台管理功能"):
-        # 提供密碼保護，避免一般訪客誤觸
         admin_pwd = st.text_input("請輸入管理員密碼：", type="password", key="admin_pwd_input")
         
-        # 預設後台管理密碼：admin888
         if admin_pwd == "admin888":
             st.success("身分驗證成功！已開啟管理權限。")
             
-            # 管理者公告編輯面板
             st.write("### 📢 編輯側邊欄公告")
             current_ann = load_announcement()
             new_ann_text = st.text_area(
@@ -1456,11 +1457,8 @@ with tab5:
                 for msg in comments:
                     st.write("---")
                     col_msg_info, col_del_btn = st.columns([5, 1])
-                    
-                    # 預覽顯示格式
                     col_msg_info.markdown(f"**【{msg['author']}】** ({msg['time']}):  \n{msg['content']}")
                     
-                    # 刪除留言按鈕
                     if col_del_btn.button("刪除此留言", key=f"del_{msg['id']}", type="secondary"):
                         comments = [c for c in comments if c["id"] != msg["id"]]
                         save_comments(comments)
@@ -1468,12 +1466,10 @@ with tab5:
                         time.sleep(0.5)
                         st.rerun()
                         
-                    # 回覆顯示狀態
                     has_reply = "reply" in msg and msg["reply"]
                     if has_reply:
                         st.info(f"當前已回覆：{msg['reply']} ({msg.get('reply_time', '')})")
                         
-                    # 回覆輸入框
                     reply_input = st.text_input(
                         "回覆此留言：" if not has_reply else "修改回覆內容：",
                         value=msg.get("reply", ""),
@@ -1482,7 +1478,6 @@ with tab5:
                     
                     col_rep_btn1, col_rep_btn2 = st.columns([1.5, 4])
                     
-                    # 送出/修改回覆
                     if col_rep_btn1.button("送出/修改回覆", key=f"rep_btn_{msg['id']}", type="primary"):
                         if reply_input.strip():
                             for c in comments:
@@ -1497,7 +1492,6 @@ with tab5:
                         else:
                             st.warning("請填寫回覆內容！")
                             
-                    # 刪除已有回覆
                     if has_reply and col_rep_btn2.button("刪除此回覆", key=f"rep_del_{msg['id']}", type="secondary"):
                         for c in comments:
                             if c["id"] == msg["id"]:
