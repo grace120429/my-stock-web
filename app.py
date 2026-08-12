@@ -395,7 +395,7 @@ with tab1:
                 selected_broker_names = []
 
         with col_cfg3:
-            tech_options = ["日線多頭排列", "日線 MACD金叉", "月營收雙增", "量能突破 (爆量 2x)", "前期箱型整理 (近10日)"]
+            tech_options = ["日線多頭排列", "日線 MACD金叉", "月營收雙增", "量能突破 (爆量 2x)", "前期箱型整理 (近5日)"]
             selected_techs = st.multiselect(
                 "指標進階過濾 (可複選)：",
                 options=tech_options,
@@ -405,7 +405,7 @@ with tab1:
             filter_macd = "日線 MACD金叉" in selected_techs
             filter_rev = "月營收雙增" in selected_techs
             filter_vol = "量能突破 (爆量 2x)" in selected_techs
-            filter_box = "前期箱型整理 (近10日)" in selected_techs
+            filter_box = "前期箱型整理 (近5日)" in selected_techs
 
     st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。若勾選多個分點取交集，下載時間可能會增加數秒。")
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
@@ -593,8 +593,8 @@ with tab1:
                             if hist.empty or len(hist) < 20:
                                 continue
                             
-                            # 💡 箱型整理檢查（排除當日收盤，檢測前 10 日是否為整理區間）
-                            is_box, box_amp = helpers.calculate_box_consolidation(hist, days=10, exclude_last_day=True)
+                            # 💡 箱型整理檢查（排除當日收盤，檢測前 5 日是否為整理區間）
+                            is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
                             if filter_box and not is_box:
                                 continue
                                 
