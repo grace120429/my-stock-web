@@ -347,6 +347,9 @@ st.title("台股三大法人飆股選股工具 by Kelly")
 twd_str = data_fetcher.fetch_twd_data()
 st.info(f"{twd_str}")
 
+# 載入自訂主力券商與分點設定 (確保所有分頁與模組均能讀取)
+brokers_dict = storage.load_custom_brokers()
+
 # ==================== 建立五大分頁 ====================
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "三大法人選股大數據", 
@@ -382,7 +385,6 @@ with tab1:
             eps_surge_active = "EPS 暴增" in selected_chips
             b_active = "分點券商" in selected_chips
             
-            brokers_dict = storage.load_custom_brokers()
             if b_active:
                 selected_broker_names = st.multiselect(
                     "選定主力分點 (多選取交集，即所有選中的分點都必須買超)：",
@@ -1007,7 +1009,7 @@ with tab2:
                     latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
                     raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                     
-                    if latest_osc_daily is not None wins and latest_osc_daily <= 0:
+                    if latest_osc_daily is not None and latest_osc_daily <= 0:
                         macd_daily_status = f"🟢 {raw_macd_daily}"
                     else:
                         macd_daily_status = f"🔴 {raw_macd_daily}"
