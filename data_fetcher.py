@@ -540,6 +540,59 @@ def fetch_etf_dividend_details(code, upcoming_dict):
         return None
 
 # ==================== 主力券商特定統計天數交易資料抓取 ====================
+
+def fetch_stock_top_brokers(code, days=5):
+    """
+    爬取指定個股全台「買超」與「賣超」前 10 名的分點券商排行
+    """
+    days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 20: 20}
+    d_param = days_map.get(days, 5)
+    
+    url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={code}&e=&f=&d={d_param}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    buyers = []
+    sellers = []
+    
+    try:
+        res = unsafe_session.get(url, headers=headers, timeout=8)
+        if res.status_code == 200:
+            html = res.content.decode('big5', errors='ignore')
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 尋找網頁中包含「買超券商」與「賣超券商」的表格
+            rows = soup.find_all('tr')
+            for row in rows:
+                tds = row.find_all('td')
+                # ZCO 表格左右分流：左邊是買超，右邊是賣超
+                if len(tds) >= 10:
+                    b_name = tds[0].text.strip()
+                    b_net = tds[3].text.strip().replace(',', '') # 淨買超張數
+                    
+                    s_name = tds[5].text.strip()
+                    s_net = tds[8].text.strip().replace(',', '') # 淨賣超張數
+                    
+                    # 過濾表頭雜訊，只取數字
+                    try:
+                        b_val = int(b_net)
+                        if b_val > 0 and b_name and "券商" not in b_name:
+                            buyers.append({"券商": b_name, "買超張數": b_val})
+                    except ValueError:
+                        pass
+                        
+                    try:
+                        s_val = int(s_net)
+                        if s_val > 0 and s_name and "券商" not in s_name:
+                            sellers.append({"券商": s_name, "賣超張數": s_val})
+                    except ValueError:
+                        pass
+    except Exception as e:
+        print(f"Error fetching top brokers for {code}: {e}")
+        
+    # 只取前 10 名
+    return buyers[:10], sellers[:10]
 def fetch_broker_net_buys(broker_id, days):
     broker_id = str(broker_id).upper()
     headers = {
