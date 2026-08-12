@@ -54,7 +54,7 @@ def save_local_piggy_bank(new_dict):
         localS.setItem("my_piggy_bank_local", new_dict)
     except Exception:
         pass
-    # ❌ 徹底移除 storage.save_piggy_bank(new_dict) 呼召，不再往雲端硬碟寫入資料
+    # ❌ 徹底移除 storage.save_piggy_bank(new_dict) 呼叫，不再往雲端硬碟寫入資料
 
 # ==================== 側邊欄公告檔案讀寫輔助函數 ====================
 ANNOUNCEMENT_FILE = "announcement.json"
@@ -995,7 +995,7 @@ with tab2:
                                     latest_a_eps_val_tab2 = "N/A"
                             else:
                                 latest_q_eps_val_tab2 = "N/A"
-                                    latest_a_eps_val_tab2 = "N/A"
+                                latest_a_eps_val_tab2 = "N/A"
                         except:
                             latest_q_eps_val_tab2 = "N/A"
                             latest_a_eps_val_tab2 = "N/A"
@@ -1007,7 +1007,7 @@ with tab2:
                     latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
                     raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                     
-                    if latest_osc_daily is not None and latest_osc_daily <= 0:
+                    if latest_osc_daily is not None wins and latest_osc_daily <= 0:
                         macd_daily_status = f"🟢 {raw_macd_daily}"
                     else:
                         macd_daily_status = f"🔴 {raw_macd_daily}"
