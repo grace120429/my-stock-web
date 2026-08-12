@@ -135,6 +135,34 @@ def get_macd_status_str(latest_osc, prev_osc):
         else:
             return "🔴 MACD空頭(OSC<0)"
 
+# ==================== 箱型整理 (Box Consolidation) 計算 ====================
+def calculate_box_consolidation(hist, days=10, exclude_last_day=True):
+    """
+    計算指定天數內（預設排除最新交易日）的收盤價高低波動幅度。
+    若波幅在 7.5% 以內，則視為箱型整理狀態。
+    排除最新一日的目的是為了讓使用者能偵測到「今天剛好突破箱型」的標的。
+    """
+    needed_len = days + 1 if exclude_last_day else days
+    if len(hist) < needed_len:
+        return False, 0.0
+        
+    start_idx = -(days + 1) if exclude_last_day else -days
+    end_idx = -1 if exclude_last_day else None
+    
+    # 採用收盤價序列進行波幅計算，能有效過濾掉極端非理性的盤中上下影線，更能反應真實整理區間
+    subset = hist['Close'].iloc[start_idx:end_idx]
+    highest = subset.max()
+    lowest = subset.min()
+    
+    if lowest <= 0:
+        return False, 0.0
+        
+    # 計算這段期間的高低點差距百分比
+    amplitude = ((highest - lowest) / lowest) * 100
+    
+    # 在實務上，10個交易日內波幅在 7.5% 以內，屬於籌碼高度集中的狹幅盤整
+    is_consolidating = amplitude <= 7.5
+    return is_consolidating, round(amplitude, 1)
 # ==================== 營收格式化工具 ====================
 def format_rev_growth(rev_item):
     if not rev_item:
