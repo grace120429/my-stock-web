@@ -395,7 +395,7 @@ with tab1:
                 selected_broker_names = []
 
         with col_cfg3:
-            tech_options = ["日線多頭排列", "日線 MACD金叉", "月營收雙增", "量能突破 (爆量 2x)"]
+            tech_options = ["日線多頭排列", "日線 MACD金叉", "月營收雙增", "量能突破 (爆量 2x)", "前期箱型整理 (近10日)"]
             selected_techs = st.multiselect(
                 "指標進階過濾 (可複選)：",
                 options=tech_options,
@@ -405,6 +405,7 @@ with tab1:
             filter_macd = "日線 MACD金叉" in selected_techs
             filter_rev = "月營收雙增" in selected_techs
             filter_vol = "量能突破 (爆量 2x)" in selected_techs
+            filter_box = "前期箱型整理 (近10日)" in selected_techs
 
     st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。若勾選多個分點取交集，下載時間可能會增加數秒。")
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
@@ -591,6 +592,11 @@ with tab1:
                             
                             if hist.empty or len(hist) < 20:
                                 continue
+                            
+                            # 💡 箱型整理檢查（排除當日收盤，檢測前 10 日是否為整理區間）
+                            is_box, box_amp = helpers.calculate_box_consolidation(hist, days=10, exclude_last_day=True)
+                            if filter_box and not is_box:
+                                continue
                                 
                             if not is_code_etf:
                                 try:
@@ -725,6 +731,7 @@ with tab1:
                                 "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
                                 "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
                                 "均線狀態": ma_status_display,
+                                "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",  # 新增箱型特徵欄位
                                 "日K_MACD": macd_daily_status,
                                 "60m_MACD": macd_60m_status,
                                 "短期支壓(1M)": sr_1m,
@@ -1380,7 +1387,7 @@ with tab5:
     with st.form("comment_form", clear_on_submit=True):
         col_author, col_submit = st.columns([1, 3])
         author_name = col_author.text_input("您的稱呼：", max_chars=10, value="匿名讀者")
-        comment_content = st.text_area("留言內容：", max_chars=200, placeholder="歡迎在這裡分享您的想法或回饋...")
+        comment_content = st.text_area("留言內容：", max_chars=200, placeholder="歡迎在這裡分享您的想法 or 回饋...")
         submitted = st.form_submit_button("送出留言")
         
         if submitted:
