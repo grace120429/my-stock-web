@@ -54,7 +54,7 @@ def save_local_piggy_bank(new_dict):
         localS.setItem("my_piggy_bank_local", new_dict)
     except Exception:
         pass
-    # ❌ 徹底移除 storage.save_piggy_bank(new_dict) 呼叫，不再往雲端硬碟寫入資料
+    # ❌ 徹底移除 storage.save_piggy_bank(new_dict) 呼召，不再往雲端硬碟寫入資料
 
 # ==================== 側邊欄公告檔案讀寫輔助函數 ====================
 ANNOUNCEMENT_FILE = "announcement.json"
@@ -80,7 +80,7 @@ def save_announcement(data):
     except Exception as e:
         st.error(f"儲存公告失敗: {e}")
 
-# ==================== 💡 新增：一鍵解析全台所有分點 Top 10 買賣超爬蟲 (獨立於 app.py) ====================
+# ==================== 一鍵解析全台所有分點 Top 10 買賣超爬蟲 ====================
 def fetch_stock_top_brokers_local(code, days=5):
     """
     爬取指定個股全台「買超」與「賣超」前 10 名的非自選分點券商排行
@@ -116,7 +116,7 @@ def fetch_stock_top_brokers_local(code, days=5):
                     s_name = tds[5].text.strip()
                     s_net = tds[8].text.strip().replace(',', '')  # 淨賣超張數
                     
-                    # 過濾雜訊
+                    # 過濾表頭等雜訊
                     try:
                         b_val = int(b_net)
                         if b_val > 0 and b_name and "券商" not in b_name and "買超" not in b_name:
@@ -341,6 +341,10 @@ st.sidebar.markdown(
 )
 
 # ==================== 頁首資訊 ====================
+st.title("台股三大法人飆股選股工具 by Kelly")
+
+# 載入即時台幣匯率與集保資料日期
+twd_str = data_fetcher.fetch_twd_data()
 st.info(f"{twd_str}")
 
 # ==================== 建立五大分頁 ====================
@@ -991,7 +995,7 @@ with tab2:
                                     latest_a_eps_val_tab2 = "N/A"
                             else:
                                 latest_q_eps_val_tab2 = "N/A"
-                                latest_a_eps_val_tab2 = "N/A"
+                                    latest_a_eps_val_tab2 = "N/A"
                         except:
                             latest_q_eps_val_tab2 = "N/A"
                             latest_a_eps_val_tab2 = "N/A"
