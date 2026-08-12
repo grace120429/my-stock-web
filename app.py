@@ -313,7 +313,7 @@ with tab1:
         col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.5, 2.5])
         
         with col_cfg1:
-            days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=1, key="tab1_days")
+            days_count = st.selectbox("籌碼區間：", [1, 3, 5, 7, 30, 60, 120], index=0, key="tab1_days")
             
         with col_cfg2:
             # SaaS 科技感多選標籤 (Pills)
