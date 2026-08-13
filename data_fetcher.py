@@ -429,15 +429,19 @@ def fetch_moneydj_pre_dividend(code):
 def fetch_etf_dividend_details(code, upcoming_dict):
     ticker_tw = f"{code}.TW"
     try:
-        stock = yf.Ticker(ticker_tw, session=unsafe_session)
-        hist = data_fetcher.fetch_historical_data_cached(ticker, period="1y")
-        if hist.empty:
+        # 呼叫快取，如果失敗它會自動拋出 Error，並被下方的 except 捕獲
+        hist = fetch_historical_data_cached(ticker_tw, period="1y")
+    except Exception:
+        # .TW 失敗了，嘗試 .TWO
+        try:
             ticker_two = f"{code}.TWO"
-            stock = yf.Ticker(ticker_two, session=unsafe_session)
-            hist = data_fetcher.fetch_historical_data_cached(ticker, period="1y")
-            if hist.empty:
-                return None
-        
+            hist = fetch_historical_data_cached(ticker_two, period="1y")
+        except Exception:
+            # 兩邊都失敗則返回 None，且此失敗「不會」被寫入 Streamlit 快取中
+            return None
+            
+    # 當順利取得 K 線 DataFrame 時，才繼續執行後續的運算
+    try:
         price = hist['Close'].iloc[-1]
         prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
         pct_change = ((price - prev_price) / prev_price) * 100
@@ -545,13 +549,15 @@ def fetch_etf_dividend_details(code, upcoming_dict):
 # 這樣所有人造訪都會共享抓下來的資料，避免頻繁請求雅虎
 @st.cache_data(ttl=14400)
 def fetch_historical_data_cached(ticker, period="6mo"):
-    try:
-        # 使用 config 內建的安全連線 Session
-        from config import unsafe_session
-        stock = yf.Ticker(ticker, session=unsafe_session)
-        hist = stock.history(period=period)
-        if not hist.empty:
-            return hist
+    # 使用 config 內建的安全連線 Session
+    from config import unsafe_session
+    stock = yf.Ticker(ticker, session=unsafe_session)
+    hist = stock.history(period=period)
+    
+    # 💡 核心修正：如果抓到空資料，拋出錯誤，讓 Streamlit 不要快取這一次的「失敗空值」！
+    if hist is None or hist.empty:
+        raise ValueError(f"Yahoo Finance returned empty data for {ticker}")
+    return hist
     except Exception as e:
         print(f"Error fetching cached data for {ticker}: {e}")
     return None
