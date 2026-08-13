@@ -7,6 +7,8 @@ import yfinance as yf
 from io import StringIO
 from bs4 import BeautifulSoup
 import requests as std_requests
+import streamlit as st  
+
 from config import unsafe_session
 import helpers
 
