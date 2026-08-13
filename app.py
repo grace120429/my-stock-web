@@ -1076,7 +1076,7 @@ with tab2:
         if w_rows:
             df_w = pd.DataFrame(w_rows)
             
-            # 💡 升級：啟用 dataframe 的選取功能 (on_select="rerun")
+            # 💡 啟用 dataframe 的選取功能 (on_select="rerun")
             event_tab2 = st.dataframe(
                 df_w,
                 use_container_width=True,
@@ -1151,10 +1151,8 @@ with tab2:
                                 else:
                                     st.caption("無賣超排行資料")
                         else:
-                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")		
-		
-		
-		else:
+                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
+        else:
             st.warning("自選股數據分析失敗，請查看下方診斷報告。")
             
         if errors_log_tab2:
