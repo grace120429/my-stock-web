@@ -539,6 +539,20 @@ def fetch_etf_dividend_details(code, upcoming_dict):
         print(f"Error fetching ETF {code}: {e}")
         return None
 
+# 💡 新增：全域共享快取，預設快取 4 小時 (14400秒)
+# 這樣所有人造訪都會共享抓下來的資料，避免頻繁請求雅虎
+@st.cache_data(ttl=14400)
+def fetch_historical_data_cached(ticker, period="6mo"):
+    try:
+        # 使用 config 內建的安全連線 Session
+        from config import unsafe_session
+        stock = yf.Ticker(ticker, session=unsafe_session)
+        hist = stock.history(period=period)
+        if not hist.empty:
+            return hist
+    except Exception as e:
+        print(f"Error fetching cached data for {ticker}: {e}")
+    return None
 # ==================== 主力券商特定統計天數交易資料抓取 ====================
 
 def fetch_stock_top_brokers(code, days=5):
