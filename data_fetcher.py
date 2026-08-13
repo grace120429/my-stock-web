@@ -7,10 +7,24 @@ import yfinance as yf
 from io import StringIO
 from bs4 import BeautifulSoup
 import requests as std_requests
-import streamlit as st  
-
+import streamlit as st
 from config import unsafe_session
 import helpers
+
+# ==================== 歷史資料全域安全快取 ====================
+@st.cache_data(ttl=14400)
+def fetch_historical_data_cached(ticker, period="6mo"):
+    try:
+        stock = yf.Ticker(ticker, session=unsafe_session)
+        hist = stock.history(period=period)
+        
+        # 💡 核心修正：如果抓到空資料，拋出錯誤，讓 Streamlit 不要快取這一次的「失敗空值」！
+        if hist is None or hist.empty:
+            raise ValueError(f"Yahoo Finance returned empty data for {ticker}")
+        return hist
+    except Exception as e:
+        # 拋出錯誤以阻止 Streamlit 快取失敗的空值 (None)
+        raise RuntimeError(f"Failed to fetch {ticker}: {str(e)}")
 
 # ==================== 三大法人買賣超資料抓取 ====================
 def fetch_twse_t86(date_str):
@@ -545,24 +559,7 @@ def fetch_etf_dividend_details(code, upcoming_dict):
         print(f"Error fetching ETF {code}: {e}")
         return None
 
-# 💡 新增：全域共享快取，預設快取 4 小時 (14400秒)
-# 這樣所有人造訪都會共享抓下來的資料，避免頻繁請求雅虎
-@st.cache_data(ttl=14400)
-def fetch_historical_data_cached(ticker, period="6mo"):
-    # 使用 config 內建的安全連線 Session
-    from config import unsafe_session
-    stock = yf.Ticker(ticker, session=unsafe_session)
-    hist = stock.history(period=period)
-    
-    # 💡 核心修正：如果抓到空資料，拋出錯誤，讓 Streamlit 不要快取這一次的「失敗空值」！
-    if hist is None or hist.empty:
-        raise ValueError(f"Yahoo Finance returned empty data for {ticker}")
-    return hist
-    except Exception as e:
-        print(f"Error fetching cached data for {ticker}: {e}")
-    return None
 # ==================== 主力券商特定統計天數交易資料抓取 ====================
-
 def fetch_stock_top_brokers(code, days=5):
     """
     爬取指定個股全台「買超」與「賣超」前 10 名的分點券商排行
@@ -615,6 +612,7 @@ def fetch_stock_top_brokers(code, days=5):
         
     # 只取前 10 名
     return buyers[:10], sellers[:10]
+
 def fetch_broker_net_buys(broker_id, days):
     broker_id = str(broker_id).upper()
     headers = {
