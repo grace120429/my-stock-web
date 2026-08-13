@@ -586,7 +586,7 @@ with tab1:
                             if ticker in st.session_state.yf_cache:
                                 hist = st.session_state.yf_cache[ticker]
                             else:
-                                hist = stock.history(period="6mo")
+                                hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
                                 if not hist.empty and len(hist) >= 20:
                                     st.session_state.yf_cache[ticker] = hist
                             
@@ -950,11 +950,11 @@ with tab2:
                 try:
                     time.sleep(0.15)
                     stock = yf.Ticker(ticker, session=yf_session_tab2)
-                    hist = stock.history(period="6mo")
+                    hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
                     if hist.empty:
                         ticker = f"{code}.TWO"
                         stock = yf.Ticker(ticker, session=yf_session_tab2)
-                        hist = stock.history(period="6mo")
+                        hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
                     
                     if hist.empty or len(hist) < 20:
                         errors_log_tab2.append(f"{code}: 歷史K線數據不足")
