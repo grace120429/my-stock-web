@@ -430,11 +430,11 @@ def fetch_etf_dividend_details(code, upcoming_dict):
     ticker_tw = f"{code}.TW"
     try:
         stock = yf.Ticker(ticker_tw, session=unsafe_session)
-        hist = stock.history(period="1y")
+        hist = data_fetcher.fetch_historical_data_cached(ticker, period="1y")
         if hist.empty:
             ticker_two = f"{code}.TWO"
             stock = yf.Ticker(ticker_two, session=unsafe_session)
-            hist = stock.history(period="1y")
+            hist = data_fetcher.fetch_historical_data_cached(ticker, period="1y")
             if hist.empty:
                 return None
         
