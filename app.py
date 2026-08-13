@@ -1071,11 +1071,90 @@ with tab2:
                     })
                 except Exception as ex_tab2:
                     errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
-                    continue
-                    
+                    continue                  
+        
         if w_rows:
-            st.dataframe(pd.DataFrame(w_rows), use_container_width=True)
-        else:
+            df_w = pd.DataFrame(w_rows)
+            
+            # 💡 升級：啟用 dataframe 的選取功能 (on_select="rerun")
+            event_tab2 = st.dataframe(
+                df_w,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="multi-row",
+                key="df_watchlist_table"
+            )
+            
+            # 偵測使用者在自選股表格中勾選了哪幾檔股票
+            selected_rows_tab2 = event_tab2.selection.rows
+            if selected_rows_tab2:
+                st.write("---")
+                st.markdown("### 🎯 已選自選股 - 主力分點進出特寫")
+                
+                # 自選股預設看近 5 日的主力進出
+                days_param_tab2 = 5 
+                
+                for idx in selected_rows_tab2:
+                    row_data = df_w.iloc[idx]
+                    code = row_data["代號"]
+                    name = row_data["股票名稱"]
+                    price_val = float(row_data["現價"])
+                    
+                    with st.container(border=True):
+                        st.markdown(f"**📍 {code} {name}**")
+                        
+                        # 1. 顯示我的自訂主力分點進出 (預估張數與金額)
+                        st.markdown("**📌 我的自選主力進出 (近 5 日)：**")
+                        broker_details_list = []
+                        if brokers_dict:
+                            for b_name, b_id in brokers_dict.items():
+                                # 動態向券商系統調閱該自選股的數據
+                                b_data = data_fetcher.fetch_broker_net_buys(b_id, days_param_tab2)
+                                if code in b_data:
+                                    net_buy_wan = b_data[code]["diff"]
+                                    if net_buy_wan > 0:  # 只呈現買超的主力
+                                        est_shares = int(round((net_buy_wan * 10) / price_val)) if price_val > 0 else 0
+                                        short_b_name = b_name.split(" ")[0]
+                                        broker_details_list.append(f"{short_b_name}: {est_shares}張 ({net_buy_wan}萬)")
+                                        
+                        if broker_details_list:
+                            cols = st.columns(max(len(broker_details_list), 4))
+                            for i, item in enumerate(broker_details_list):
+                                try:
+                                    parts = item.split(": ")
+                                    cols[i].metric(label=parts[0], value=parts[1])
+                                except:
+                                    cols[i].write(item)
+                        else:
+                            st.caption("自選分點在此股近 5 日內無符合之買超紀錄。")
+                            
+                        # 2. 調閱不設限的全台主力買賣超排行 Top 10
+                        st.write("")
+                        st.markdown("**🔥 全台所有分點 - 買賣超前 10 名排行 (不設限自選)：**")
+                        with st.spinner(f"正在向系統調閱 {code} 的全台主力排行..."):
+                            all_buyers, all_sellers = fetch_stock_top_brokers_local(code, days=days_param_tab2)
+                            
+                        if all_buyers or all_sellers:
+                            col_b, col_s = st.columns(2)
+                            with col_b:
+                                st.markdown("🟢 **淨買超排行 Top 10**")
+                                df_b = pd.DataFrame(all_buyers)
+                                if not df_b.empty:
+                                    st.dataframe(df_b, use_container_width=True, hide_index=True)
+                                else:
+                                    st.caption("無買超排行資料")
+                            with col_s:
+                                st.markdown("🔴 **淨賣超排行 Top 10**")
+                                df_s = pd.DataFrame(all_sellers)
+                                if not df_s.empty:
+                                    st.dataframe(df_s, use_container_width=True, hide_index=True)
+                                else:
+                                    st.caption("無賣超排行資料")
+                        else:
+                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")		
+		
+		
+		else:
             st.warning("自選股數據分析失敗，請查看下方診斷報告。")
             
         if errors_log_tab2:
