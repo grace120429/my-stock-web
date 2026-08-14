@@ -26,7 +26,7 @@ def fetch_historical_data_cached(ticker, period="6mo"):
         # 拋出錯誤以阻止 Streamlit 快取失敗的空值 (None)
         raise RuntimeError(f"Failed to fetch {ticker}: {str(e)}")
 
-# ==================== 三大法人買賣超資料抓取 ====================
+# ==================== 上市法人買賣超資料抓取 (TWSE) ====================
 def fetch_twse_t86(date_str):
     """
     抓取上市法人買賣超日報
@@ -55,6 +55,64 @@ def fetch_twse_t86(date_str):
         df = pd.DataFrame(data, columns=fields)
         df.columns = [col.strip() for col in df.columns]
         return df
+    except Exception:
+        return None
+
+# ==================== 上櫃法人買賣超資料抓取 (TPEx) ====================
+def fetch_tpex_t86(date_str):
+    """
+    抓取櫃買中心(TPEx)上櫃法人買賣超日報
+    """
+    # 將西元年轉換為民國年格式, 例如 "20260813" -> "115/08/13"
+    try:
+        year = int(date_str[:4])
+        month = date_str[4:6]
+        day = date_str[6:8]
+        roc_year = year - 1911
+        roc_date = f"{roc_year}/{month}/{day}"
+    except Exception:
+        return None
+        
+    url = f"https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&o=json&se=EW&t=D&d={roc_date}&s=0,asc"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        res = unsafe_session.get(url, headers=headers, timeout=10)
+        if res.status_code != 200: return None
+        json_data = res.json()
+        
+        # 櫃買中心法人進出資料存放在 aaData 欄位中
+        data = json_data.get("aaData")
+        if not data: return None
+        
+        rows = []
+        for r in data:
+            if len(r) >= 24: # 確保欄位數完整
+                code = str(r[0]).strip()
+                name = str(r[1]).strip()
+                
+                # 僅篩選 4~6 碼正常證券代號
+                if not re.match(r'^[a-zA-Z0-9]{4,6}$', code):
+                    continue
+                    
+                try:
+                    # 櫃買中心回傳單位為原始股數 (與證交所一致)
+                    foreign_val = float(str(r[4]).replace(',', '')) # 外陸資買賣超股數(不含自營商)
+                    trust_val = float(str(r[13]).replace(',', '')) # 投信買賣超股數
+                    dealer_val = float(str(r[22]).replace(',', '')) # 自營商買賣超股數合計
+                    
+                    rows.append({
+                        "證券代號": code,
+                        "證券名稱": name,
+                        "外陸資買賣超股數(不含外資自營商)": foreign_val,
+                        "投信買賣超股數": trust_val,
+                        "自營商買賣超股數": dealer_val
+                    })
+                except ValueError:
+                    continue
+        if not rows: return None
+        return pd.DataFrame(rows)
     except Exception:
         return None
 
@@ -213,7 +271,7 @@ def fetch_stock_name_fast(code):
         pass
     return "未知"
 
-# ==================== 多週期籌碼資料流調度處理 ====================
+# ==================== 多週期籌碼資料流調度與雙市場標準化合併處理 ====================
 def get_recent_data(days_count=3, progress_callback=None):
     valid_dfs = []
     valid_dates = [] 
@@ -236,13 +294,27 @@ def get_recent_data(days_count=3, progress_callback=None):
         if progress_callback:
             progress_callback(len(valid_dfs) + 1, days_count, date_str)
             
-        df = fetch_twse_t86(date_str)
+        # 1. 抓取上市 T86 三大法人資料
+        df_twse = fetch_twse_t86(date_str)
+        time.sleep(0.3) # 稍微睡眠，防止請求過於頻繁被櫃買中心或證交所阻擋
         
+        # 2. 抓取上櫃三大法人資料
+        df_tpex = fetch_tpex_t86(date_str)
+        
+        # 3. 雙市場融合 (上市 + 上櫃 資料流合併)
+        df_combined = None
+        if df_twse is not None and df_tpex is not None:
+            df_combined = pd.concat([df_twse, df_tpex], ignore_index=True)
+        elif df_twse is not None:
+            df_combined = df_twse
+        elif df_tpex is not None:
+            df_combined = df_tpex
+            
         delay = 1.0 if days_count >= 30 else 2.0
         time.sleep(delay) 
         
-        if df is not None:
-            valid_dfs.append(df)
+        if df_combined is not None:
+            valid_dfs.append(df_combined)
             valid_dates.append(date_str)
             
         current_date -= timedelta(days=1)
