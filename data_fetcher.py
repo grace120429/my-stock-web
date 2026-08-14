@@ -666,7 +666,7 @@ def fetch_stock_top_brokers(code, days=5):
     """
     爬取指定個股全台「買超」與「賣超」前 10 名的分點券商排行
     """
-    days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 20: 20}
+    days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
     url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={code}&e=&f=&d={d_param}"
