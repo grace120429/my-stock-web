@@ -12,6 +12,14 @@ import helpers
 import storage
 import data_fetcher
 
+# 💡 新增：數值安全轉換防護，防止 NaN 或 None 造成整頁當機
+def safe_int(val):
+    try:
+        if val is None or pd.isna(val):
+            return 0
+        return int(val)
+    except:
+        return 0
 # ==================== 瀏覽器 Local Storage 輔助管理器 ====================
 from streamlit_local_storage import LocalStorage
 
@@ -1438,19 +1446,21 @@ with tab4:
                     "總股數": f"{total_gu:,} 股",
                     "現價": f"{round(price, 1)} 元",
                     "預估單股年配息": f"{current_year_sum_val} 元",
-                    "預估年領股息": f"{int(est_annual):,} 元",
-                    "持股市值": f"{int(market_val):,} 元"
+                    "預估年領股息": f"{safe_int(est_annual):,} 元",  # 💡 安全防護
+                    "持股市值": f"{safe_int(market_val):,} 元"      # 💡 安全防護                    
                 })
         if pb_rows:
             st.dataframe(pd.DataFrame(pb_rows), use_container_width=True)
             
             col_stat1, col_stat2, col_stat3 = st.columns(3)
-            col_stat1.metric("總持股市值", f"{int(total_market_value):,} 元")
-            col_stat2.metric("預估年領總股息", f"{int(total_annual_dividend):,} 元")
+            col_stat1.metric("總持股市值", f"{safe_int(total_market_value):,} 元")
+            col_stat2.metric("預估年領總股息", f"{safe_int(total_annual_dividend):,} 元")
             col_stat3.metric(
                 f"{st.session_state.cal_month}月份預估配息收入", 
-                f"{int(total_selected_month_dividend):,} 元",
+                f"{safe_int(total_selected_month_dividend):,} 元",
                 delta="該月份實際配息收入" if total_selected_month_dividend > 0 else "本月份無除息"
+            )
+                
             )
         else:
             st.info("存錢筒目前無持股，請新增您的 ETF 持股比例。")
