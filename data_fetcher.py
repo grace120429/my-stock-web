@@ -186,42 +186,72 @@ def fetch_all_margin(date_str):
     return margin_dict
 
 # ==================== 公開資訊觀測站每月營收 CSV 抓取 ====================
+# ==================== 證交所與櫃買中心每月營收 OpenAPI JSON 抓取 ====================
 def fetch_monthly_revenue():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     revenue_dict = {}
     
+    # 採用證交所與櫃買中心全新升級的 JSON OpenAPI 串接端點
     urls = [
-        "https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv",
-        "https://mopsfin.twse.com.tw/opendata/t187ap05_O.csv"
+        "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",           # 上市公司月營收 JSON 端點
+        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"          # 上櫃公司月營收 JSON 端點
     ]
     
     for url in urls:
         try:
-            res = unsafe_session.get(url, headers=headers, timeout=8, verify=False)
+            res = unsafe_session.get(url, headers=headers, timeout=10, verify=False)
             if res.status_code == 200:
-                csv_text = res.content.decode('utf-8-sig', errors='ignore')
-                df = pd.read_csv(StringIO(csv_text))
-                df.columns = [c.strip() for c in df.columns]
+                data = res.json()
+                if not data or not isinstance(data, list):
+                    continue
                 
-                col_code = next((c for c in df.columns if "公司代號" in c or "stock" in c.lower()), None)
-                col_yoy = next((c for c in df.columns if "去年同月增減" in c or "yoy" in c.lower()), None)
-                col_mom = next((c for c in df.columns if "上月比較增減" in c or "mom" in c.lower()), None)
-                col_period = next((c for c in df.columns if "資料年月" in c or "period" in c.lower()), None)
-                col_rev = next((c for c in df.columns if "當月營收" in c or "revenue" in c.lower()), None)
+                # 動態探測首筆數據以取得欄位鍵名
+                first_row = data[0]
+                code_k, yoy_k, mom_k = None, None, None
+                for k in first_row.keys():
+                    k_str = str(k).strip()
+                    # 偵測公司代號鍵名（相容中文與英文欄位）
+                    if k_str in ("公司代號", "SecuritiesCompanyCode", "CompanyCode", "SecuritiesCode", "代號", "代碼", "公司代碼"):
+                        code_k = k
+                    # 偵測比去年同月增減 (YoY) 鍵名
+                    elif any(term in k_str for term in ["去年同月增減", "去年同月比", "YoY", "yoy", "去年同期", "LastYearCompare"]):
+                        yoy_k = k
+                    # 偵測比上月比較增減 (MoM) 鍵名
+                    elif any(term in k_str for term in ["上月比較增減", "上月增減", "MoM", "mom", "上月比", "PrevMonthCompare"]):
+                        mom_k = k
                 
-                if col_code and col_yoy and col_mom:
-                    for _, row in df.iterrows():
-                        code = str(row[col_code]).strip()
+                # 模糊比對備用機制
+                if not code_k:
+                    code_k = next((k for k in first_row.keys() if "代號" in str(k) or "code" in str(k).lower() or "Securities" in str(k)), None)
+                if not yoy_k:
+                    yoy_k = next((k for k in first_row.keys() if "去年" in str(k) or "yoy" in str(k).lower() or "LastYear" in str(k)), None)
+                if not mom_k:
+                    mom_k = next((k for k in first_row.keys() if "上月" in str(k) or "mom" in str(k).lower() or "PrevMonth" in str(k)), None)
+                
+                if code_k and yoy_k and mom_k:
+                    for row in data:
+                        code = str(row.get(code_k, "")).strip()
                         if not code or code == "nan":
                             continue
                         
                         try:
-                            yoy_val = float(str(row[col_yoy]).replace(',', '').strip())
-                            mom_val = float(str(row[col_mom]).replace(',', '').strip())
-                            period_val = str(row[col_period]).strip() if col_period else ""
-                            rev_val = float(str(row[col_rev]).replace(',', '').strip()) if col_rev else 0.0
+                            # 數值清洗，移除百分比與千分位逗號
+                            yoy_str = str(row.get(yoy_k, "0")).replace('%', '').replace(',', '').strip()
+                            mom_str = str(row.get(mom_k, "0")).replace('%', '').replace(',', '').strip()
+                            
+                            # 過濾無效字元
+                            yoy_val = float(yoy_str) if yoy_str and yoy_str not in ('－', '-', 'N/A') else 0.0
+                            mom_val = float(mom_str) if mom_str and mom_str not in ('－', '-', 'N/A') else 0.0
+                            
+                            # 出表年月或資料年月偵測
+                            period_k = next((k for k in row.keys() if "年月" in str(k) or "Period" in str(k)), "N/A")
+                            period_val = str(row.get(period_k, ""))
+                            
+                            # 營收當月金額偵測
+                            rev_k = next((k for k in row.keys() if "當月營收" in str(k) or "Revenue" in str(k)), None)
+                            rev_val = float(str(row.get(rev_k, "0")).replace(',', '')) if rev_k else 0.0
                             
                             revenue_dict[code] = {
                                 "period": period_val,
