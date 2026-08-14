@@ -660,6 +660,8 @@ with tab1:
                             latest = hist.iloc[-1]
                             
                             price = latest['Close']
+                            if pd.isna(price) or price <= 0:
+                                continue                            
                             ma5 = latest['MA5']
                             ma20 = latest['MA20']
                             
