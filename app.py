@@ -95,8 +95,7 @@ def fetch_stock_top_brokers_local(code, days=5):
     """
     from bs4 import BeautifulSoup
     from data_fetcher import unsafe_session  # 沿用專案中的連線 Session 繞過限制
-    
-    days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 20: 20}
+    days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
     url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={code}&e=&f=&d={d_param}"
@@ -375,7 +374,7 @@ with tab1:
         col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.5, 2.5])
         
         with col_cfg1:
-            days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 30, 60, 120], index=0, key="tab1_days")
+            days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 15, 30, 60, 120], index=0, key="tab1_days")
             
         with col_cfg2:
             chip_options = ["外資", "投信", "自營商", "融資 (資增)", "融資 (餘額最高)", "EPS 暴增", "分點券商"]
@@ -458,7 +457,7 @@ with tab1:
                 
                 multi_broker_data = {}
                 if b_active and selected_broker_names:
-                    days_param = 5 if days_count <= 7 else 20
+                    days_param = 5 if days_count <= 7 else (15 if days_count == 15 else 20)
                     for b_name in selected_broker_names:
                         broker_id = brokers_dict.get(b_name)
                         if broker_id:
