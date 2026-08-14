@@ -403,7 +403,7 @@ with tab1:
                 selected_broker_names = []
 
         with col_cfg3:
-            tech_options = ["日線多頭排列", "日線 MACD金叉", "月營收雙增", "量能突破 (爆量 2x)", "前期箱型整理 (近5日)"]
+            tech_options = ["日線多頭排列", "日線 MACD金叉", "月營收雙增", "量能突破 (爆量 2x)", "前期箱型整理 (近5日)", "強勢飆股 (近5日漲幅 > 10%)"]
             selected_techs = st.multiselect(
                 "指標進階過濾 (可複選)：",
                 options=tech_options,
@@ -414,6 +414,7 @@ with tab1:
             filter_rev = "月營收雙增" in selected_techs
             filter_vol = "量能突破 (爆量 2x)" in selected_techs
             filter_box = "前期箱型整理 (近5日)" in selected_techs
+            filter_momentum = "強勢飆股 (近5日漲幅 > 10%)" in selected_techs
 
     st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。若勾選多個分點取交集，下載時間可能會增加數秒。")
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
@@ -660,8 +661,23 @@ with tab1:
                             latest = hist.iloc[-1]
                             
                             price = latest['Close']
+                            # 💡 飆股漲幅計算：計算前第 5 個交易日到今天的累積漲幅
+                            pct_change_5d = 0.0
+                            if len(hist) >= 6:
+                                price_5d_ago = hist['Close'].iloc[-6]
+                                if price_5d_ago > 0:
+                                    pct_change_5d = ((price - price_5d_ago) / price_5d_ago) * 100
+                            
+                            # 強勢飆股定義：近 5 日累積漲幅大於 10% 且 均線呈多頭排列（站穩5日與20日線之上）
+                            is_momentum_stock = (pct_change_5d > 10.0) and (price > latest['MA5']) and (latest['MA5'] > latest['MA20'])
+                            
+                            if filter_momentum and not is_momentum_stock:
+                                continue
+                                
+                            # 💡 原有的安全防禦：如果收盤價為無效值 (NaN) 則跳過
                             if pd.isna(price) or price <= 0:
-                                continue                            
+                                continue
+                    
                             ma5 = latest['MA5']
                             ma20 = latest['MA20']
                             
