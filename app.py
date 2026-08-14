@@ -1459,7 +1459,6 @@ with tab4:
                 f"{st.session_state.cal_month}月份預估配息收入", 
                 f"{safe_int(total_selected_month_dividend):,} 元",
                 delta="該月份實際配息收入" if total_selected_month_dividend > 0 else "本月份無除息"
-            )
                 
             )
         else:
