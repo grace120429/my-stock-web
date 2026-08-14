@@ -937,7 +937,8 @@ with tab2:
                 st.caption("目前監控清單為空。")
                 
     st.write("---")
-    st.markdown("### 自選股雙週期趨勢與警示看板")
+    st.markdown("### 自選股雙週期趨勢與全方位指標看板")
+    st.caption("💡 註：自選股的三大法人籌碼金額（外/投/自）與融資增減，預設是以 **近 5 日** 累計變動為統計基準。")
     
     col_refresh, col_codes = st.columns([1, 4])
     with col_refresh:
@@ -958,7 +959,63 @@ with tab2:
         errors_log_tab2 = []
         yf_session_tab2 = create_yf_session()
         
-        with st.spinner("正在分析自選股趨勢與支撐壓力點，請稍候..."):
+        with st.spinner("正在分析自選股籌碼、財報與技術指標，請稍候..."):
+            # 1. 抓取近 5 日三大法人合併資料以計算自選股籌碼
+            chip_dfs, t86_dates = data_fetcher.get_recent_data(days_count=5)
+            summary_chip = pd.DataFrame()
+            margin_data = {}
+            
+            if chip_dfs:
+                chip_raw = pd.concat(chip_dfs, ignore_index=True)
+                col_foreign, col_trust, col_dealer = None, None, None
+                for c in chip_raw.columns:
+                    if "外陸資買賣超股數(不含外資自營商)" == c: col_foreign = c
+                    elif "投信買賣超股數" == c: col_trust = c
+                    elif "自營商買賣超股數" == c: col_dealer = c
+                if not col_foreign:
+                    for c in chip_raw.columns:
+                        if "外陸資買賣超股數" in c or "外資買賣超股數" in c:
+                            col_foreign = c
+                            break
+                if not col_trust:
+                    for c in chip_raw.columns:
+                        if "投信買賣超" in c:
+                            col_trust = c
+                            break
+                if not col_dealer:
+                    for c in chip_raw.columns:
+                        if "自營商買賣超股數" in c and "自行買賣" not in c and "避險" not in c:
+                            col_dealer = c
+                            break
+                
+                def to_num(val):
+                    try: return float(str(val).replace(',', ''))
+                    except: return 0.0
+                
+                if col_foreign: chip_raw[col_foreign] = chip_raw[col_foreign].apply(to_num)
+                if col_trust: chip_raw[col_trust] = chip_raw[col_trust].apply(to_num)
+                if col_dealer: chip_raw[col_dealer] = chip_raw[col_dealer].apply(to_num)
+                
+                summary_chip = chip_raw.groupby(['證券代號']).agg({
+                    col_foreign: 'sum' if col_foreign else 'max',
+                    col_trust: 'sum' if col_trust else 'max',
+                    col_dealer: 'sum' if col_dealer else 'max'
+                }).reset_index()
+                
+                summary_chip['外資_張'] = summary_chip[col_foreign] / 1000 if col_foreign else 0
+                summary_chip['投信_張'] = summary_chip[col_trust] / 1000 if col_trust else 0
+                summary_chip['自營_張'] = summary_chip[col_dealer] / 1000 if col_dealer else 0
+
+            # 2. 獲取當日信用交易數據
+            if t86_dates:
+                sorted_dates = sorted(t86_dates, reverse=True)
+                for d_str in sorted_dates:
+                    temp_margin = data_fetcher.fetch_all_margin(d_str)
+                    if temp_margin:
+                        margin_data = temp_margin
+                        break
+                    time.sleep(0.1)
+
             revenue_data = data_fetcher.fetch_monthly_revenue()
             tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
             tdcc_ratios, tdcc_changes = {}, {}
@@ -966,22 +1023,19 @@ with tab2:
                 tdcc_ratios, tdcc_changes, _ = storage.save_and_get_tdcc_change(tdcc_raw, tdcc_date)
                 
             for code in watchlist:
-                ticker = f"{code}.TW"
-                name = data_fetcher.fetch_stock_name_fast(code)
-                
-                is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
-                latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
-                latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
-                
                 try:
-
                     time.sleep(0.15)
-                    # 💡 核心優化：優先嘗試 .TW（上市）
+                    # 優先嘗試 .TW，失敗時再嘗試 .TWO（上櫃）
                     ticker = f"{code}.TW"
+                    name = data_fetcher.fetch_stock_name_fast(code)
+                    
+                    is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
+                    latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
+                    latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
+                    
                     try:
                         hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
                     except Exception:
-                        # 若 .TW 拋出連線或無資料錯誤（如 6182 上櫃股），則自動轉向嘗試 .TWO（上櫃）後綴
                         ticker = f"{code}.TWO"
                         hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
                         
@@ -989,8 +1043,10 @@ with tab2:
                         errors_log_tab2.append(f"{code}: 歷史K線數據不足")
                         continue
                         
+                    # 分析個股最新財報
                     if not is_code_etf_tab2:
                         try:
+                            stock = yf.Ticker(ticker, session=yf_session_tab2)
                             try:
                                 q_stmt = stock.quarterly_income_stmt
                                 a_stmt = stock.income_stmt
@@ -1017,13 +1073,13 @@ with tab2:
                                     except:
                                         pass
                                 if a_eps_val is None:
-                                        try:
-                                            first_date = a_eps_series.index[0]
-                                            dt = pd.to_datetime(first_date)
-                                            a_eps_val = a_eps_series.iloc[0]
-                                            a_eps_year = dt.year
-                                        except:
-                                            pass
+                                    try:
+                                        first_date = a_eps_series.index[0]
+                                        dt = pd.to_datetime(first_date)
+                                        a_eps_val = a_eps_series.iloc[0]
+                                        a_eps_year = dt.year
+                                    except:
+                                        pass
                                 
                                 if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
                                     latest_q_eps_val_tab2 = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
@@ -1042,6 +1098,24 @@ with tab2:
                     prev_price = hist['Close'].iloc[-2]
                     pct_change = ((price - prev_price) / prev_price) * 100
                     
+                    # 計算均線與箱型整理指標
+                    is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
+                    hist['MA5'] = hist['Close'].rolling(5).mean()
+                    hist['MA20'] = hist['Close'].rolling(20).mean()
+                    latest = hist.iloc[-1]
+                    ma5 = latest['MA5']
+                    ma20 = latest['MA20']
+                    
+                    is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
+                    ma_status = "均線向上" if is_bullish else "整理/向下"
+                    
+                    latest_vol = hist['Volume'].iloc[-1]
+                    prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
+                    vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
+                    vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
+                    ma_status_display = f"{ma_status} ({vol_status_str})"
+
+                    # 計算雙週期 MACD
                     latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
                     raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                     
@@ -1062,41 +1136,43 @@ with tab2:
                             macd_60m_status = f"🔴 {raw_macd_60m}"
                     except:
                         macd_60m_status = "N/A"
-                        latest_osc_60m = None
-                        
-                    is_daily_bear = (latest_osc_daily is not None and latest_osc_daily <= 0)
-                    is_60m_bear = (latest_osc_60m is not None and latest_osc_60m <= 0)
-                    if is_daily_bear and is_60m_bear:
-                        alert_str = "🟢 賣出警示 (MACD雙空)"
-                    elif is_daily_bear and not is_60m_bear:
-                        alert_str = "🟡 先驅起漲 (日空/短轉強)"
-                    elif not is_daily_bear and is_60m_bear:
-                        alert_str = "🟡 短線修正 (日多/短轉弱)"
-                    else:
-                        alert_str = "🔴 趨勢強勢 (MACD雙多)"
-                    
-                    latest_vol = hist['Volume'].iloc[-1]
-                    prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
-                    vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
-                    vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
-                    alert_str_display = f"{alert_str} ({vol_status_str})"
                         
                     sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
+                    
+                    # 擷取三大法人籌碼變動
+                    row_chip = summary_chip[summary_chip['證券代號'] == code] if not summary_chip.empty else pd.DataFrame()
+                    f_shares = row_chip['外資_張'].values[0] if not row_chip.empty else 0.0
+                    t_shares = row_chip['投信_張'].values[0] if not row_chip.empty else 0.0
+                    d_shares = row_chip['自營_張'].values[0] if not row_chip.empty else 0.0
+                    
+                    # 擷取融資信用額度
+                    margin_change = 0
+                    margin_today = 0
+                    if code in margin_data:
+                        margin_change = int(margin_data[code].get("change", 0.0))
+                        margin_today = int(margin_data[code].get("today", 0.0))
                     
                     w_rows.append({
                         "代號": code,
                         "股票名稱": name,
-                        "現價": round(price, 1),
+                        "收盤價": round(price, 1),
                         "漲跌幅(%)": round(pct_change, 2),
                         "最新單季EPS": latest_q_eps_val_tab2,
                         "去年年度EPS": latest_a_eps_val_tab2,
                         "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),
+                        "外資金額(萬)": round(f_shares * price / 10, 1),
+                        "投信金額(萬)": round(t_shares * price / 10, 1),
+                        "自營金額(萬)": round(d_shares * price / 10, 1),
+                        "融資餘額(張)": margin_today,
+                        "融資變動(張)": margin_change,
                         "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
+                        "均線狀態": ma_status_display,
+                        "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",
                         "日K_MACD": macd_daily_status,
-                        "60分K_MACD": macd_60m_status,
-                        "趨勢狀態": alert_str_display,
+                        "60m_MACD": macd_60m_status,
                         "短期支壓(1M)": sr_1m,
-                        "中期支壓(6M)": sr_6m
+                        "中期支壓(6M)": sr_6m,
+                        "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
                     })
                 except Exception as ex_tab2:
                     errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
@@ -1105,9 +1181,12 @@ with tab2:
         if w_rows:
             df_w = pd.DataFrame(w_rows)
             
-            # 💡 啟用 dataframe 的選取功能 (on_select="rerun")
+            # 啟用與 Tab 1 相同的 HTML LinkColumn 配置
             event_tab2 = st.dataframe(
                 df_w,
+                column_config={
+                    "K線圖網址": st.column_config.LinkColumn("看日K線圖", display_text="開啟奇摩股市")
+                },
                 use_container_width=True,
                 on_select="rerun",
                 selection_mode="multi-row",
@@ -1127,7 +1206,7 @@ with tab2:
                     row_data = df_w.iloc[idx]
                     code = row_data["代號"]
                     name = row_data["股票名稱"]
-                    price_val = float(row_data["現價"])
+                    price_val = float(row_data["收盤價"])
                     
                     with st.container(border=True):
                         st.markdown(f"**📍 {code} {name}**")
@@ -1137,7 +1216,6 @@ with tab2:
                         broker_details_list = []
                         if brokers_dict:
                             for b_name, b_id in brokers_dict.items():
-                                # 動態向券商系統調閱該自選股的數據
                                 b_data = data_fetcher.fetch_broker_net_buys(b_id, days_param_tab2)
                                 if code in b_data:
                                     net_buy_wan = b_data[code]["diff"]
