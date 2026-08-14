@@ -956,14 +956,17 @@ with tab2:
                 latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
                 
                 try:
+
                     time.sleep(0.15)
-                    stock = yf.Ticker(ticker, session=yf_session_tab2)
-                    hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
-                    if hist.empty:
-                        ticker = f"{code}.TWO"
-                        stock = yf.Ticker(ticker, session=yf_session_tab2)
+                    # 💡 核心優化：優先嘗試 .TW（上市）
+                    ticker = f"{code}.TW"
+                    try:
                         hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
-                    
+                    except Exception:
+                        # 若 .TW 拋出連線或無資料錯誤（如 6182 上櫃股），則自動轉向嘗試 .TWO（上櫃）後綴
+                        ticker = f"{code}.TWO"
+                        hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                        
                     if hist.empty or len(hist) < 20:
                         errors_log_tab2.append(f"{code}: 歷史K線數據不足")
                         continue
