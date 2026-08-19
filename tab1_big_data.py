@@ -6,7 +6,9 @@ import time
 import data_fetcher
 import helpers
 import storage
-import utils
+
+# 💡 安全重定向引進 [1]
+import app_utils as utils
 
 def render_tab1(brokers_dict):
     st.subheader("核心篩選與指標過濾")
@@ -100,7 +102,6 @@ def render_tab1(brokers_dict):
                 st.session_state.margin_date_used = margin_date_used
                 
                 revenue_data = data_fetcher.fetch_monthly_revenue()
-                
                 capital_data = data_fetcher.fetch_stock_capitals()
                 
                 multi_broker_data = {}
@@ -436,7 +437,7 @@ def render_tab1(brokers_dict):
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
-                    # 💡 自動 API 連線故障診斷 [1]
+                    # 💡 自動 API 連線故障診斷
                     if yf_fail_count > 0:
                         st.warning("⚠️ 偵測到 Yahoo Finance 數據伺服器目前對雲端伺服器進行了臨時頻率限制 (Error 429 - 請求過於頻繁)，導致所有候選股歷史 K 線下載失敗。建議您直接再次點擊上方「開始一鍵篩選股票」按鈕重試，或稍等 1-2 分鐘再試。")
                     else:
