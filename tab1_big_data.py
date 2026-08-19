@@ -240,7 +240,7 @@ def render_tab1(brokers_dict):
                             continue
                         elif cap_filter_opt == "微型股 (股本 < 10億)" and stock_cap >= 10.0:
                             continue
-                        elif cap_filter_opt == "心中大型股 (股本 >= 50億)" and stock_cap < 50.0:
+                        elif cap_filter_opt == "中大型股 (股本 >= 50億)" and stock_cap < 50.0:
                             continue
                             
                         rev_item = revenue_data.get(code)
@@ -279,7 +279,7 @@ def render_tab1(brokers_dict):
                                         hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
                                         if not hist.empty and len(hist) >= 20:
                                             st.session_state.yf_cache[ticker] = hist
-                                except Exception:
+                                try:
                                     ticker = f"{code}.TWO"
                                     if ticker in st.session_state.yf_cache:
                                         hist = st.session_state.yf_cache[ticker]
@@ -287,6 +287,8 @@ def render_tab1(brokers_dict):
                                         hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
                                         if not hist.empty and len(hist) >= 20:
                                             st.session_state.yf_cache[ticker] = hist
+                                except Exception:
+                                    pass
                                             
                                 if hist.empty or len(hist) < 20:
                                     continue
