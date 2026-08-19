@@ -96,7 +96,7 @@ def fetch_stock_top_brokers_local(code, days=5):
     from bs4 import BeautifulSoup
     from data_fetcher import unsafe_session  # 沿用專案中的連線 Session 繞過限制
     
-    # 💡 升級：支援 15 天與大天數映射
+    # 💡 升級：支援 15 天與大天數映射 [2]
     days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
@@ -770,7 +770,7 @@ with tab1:
                                 "代號": code,
                                 "股票名稱": name,
                                 "收盤價": round(price, 1),
-                                "股本(億)": stock_cap if stock_cap > 0 else None,  # 💡 新增股本欄位
+                                "股本(億)": stock_cap if stock_cap > 0 else None,  # 💡 整合股本欄位
                                 "漲跌幅(%)": round(pct_change, 2),
                                 "最新單季EPS": latest_q_eps_val,
                                 "去年年度EPS": latest_a_eps_val,
@@ -839,6 +839,8 @@ with tab1:
                 st.write("---")
                 st.markdown("### 🎯 已選個股 - 主力分點進出特寫")
                 for idx in selected_rows:
+                    if idx >= len(df_res):  # 💡 防禦性安全機制：防止 Streamlit 狀態殘留導致當機 [1]
+                        continue
                     row_data = df_res.iloc[idx]
                     code = row_data["代號"]
                     name = row_data["股票名稱"]
@@ -938,27 +940,30 @@ with tab2:
                             st.info(f"{new_watchlist_code} 已存在名單中。")
                             
         with col_rem:
-            st.markdown("**🗑️ 批次移除自選股**")
+            st.markdown("**🗑️ 批次勾選移除自選股**")
             if watchlist:
-                col_rem_select, col_rem_btn = st.columns([3, 1])
-                with col_rem_select:
-                    remove_targets = st.multiselect(
-                        "選擇要移除的股票：",
-                        options=watchlist,
-                        default=[],
-                        label_visibility="collapsed",
-                        placeholder="請選擇待刪除代號"
-                    )
-                with col_rem_btn:
-                    if st.button("確認移除", use_container_width=True, type="secondary", key="btn_rem_tab2"):
-                        if remove_targets:
-                            updated_watchlist = [code for code in watchlist if code not in remove_targets]
+                # 💡 升級：展開式勾選清單 (Checkbox Grid) 批次刪除 [1]
+                with st.expander("👉 展開自選股勾選清單 (可多選一鍵刪除)", expanded=False):
+                    cols = st.columns(4)
+                    to_remove = []
+                    
+                    for i, code in enumerate(watchlist):
+                        # 自動取得中文股票名稱
+                        name = data_fetcher.fetch_stock_name_fast(code)
+                        label = f"{code} {name}" if name != "未知" else f"{code}"
+                        
+                        with cols[i % 4]:
+                            if st.checkbox(label, key=f"del_chk_{code}"):
+                                to_remove.append(code)
+                    
+                    if to_remove:
+                        st.write("")
+                        if st.button(f"🗑️ 確認移除已勾選的 {len(to_remove)} 檔股票", type="secondary", use_container_width=True):
+                            updated_watchlist = [c for c in watchlist if c not in to_remove]
                             save_local_watchlist(updated_watchlist)
-                            st.success(f"已成功移除：{', '.join(remove_targets)}！")
+                            st.success(f"已成功從您的自選清單移除：{', '.join(to_remove)}！")
                             time.sleep(0.5)
                             st.rerun()
-                        else:
-                            st.warning("請先選取移除標的！")
             else:
                 st.caption("目前監控清單為空。")
                 
@@ -1189,7 +1194,7 @@ with tab2:
                         "代號": code,
                         "股票名稱": name,
                         "收盤價": round(price, 1),
-                        "股本(億)": stock_cap if stock_cap > 0 else None,  # 💡 新增股本欄位
+                        "股本(億)": stock_cap if stock_cap > 0 else None,  # 💡 整合股本欄位
                         "漲跌幅(%)": round(pct_change, 2),
                         "最新單季EPS": latest_q_eps_val_tab2,
                         "去年年度EPS": latest_a_eps_val_tab2,
@@ -1238,6 +1243,8 @@ with tab2:
                 days_param_tab2 = 5 
                 
                 for idx in selected_rows_tab2:
+                    if idx >= len(df_w):  # 💡 防禦性安全機制：防止 Streamlit 狀態殘留導致當機 [1]
+                        continue
                     row_data = df_w.iloc[idx]
                     code = row_data["代號"]
                     name = row_data["股票名稱"]
@@ -1571,7 +1578,7 @@ with tab4:
                 except:
                     pass
                     
-                if ex_month == st.session_state.cal_month and ex_year == st.session_state.cal_year:
+                if ex_month == st.session_state.cal_month && ex_year == st.session_state.cal_year:
                     total_selected_month_dividend += total_gu * latest_div_value
                 
                 pb_rows.append({
