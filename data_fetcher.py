@@ -1,6 +1,7 @@
 # data_fetcher.py
 import time
 import re
+import random  # 💡 引入隨機模組用於輪替瀏覽器標頭
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import yfinance as yf
@@ -11,20 +12,102 @@ import streamlit as st
 from config import unsafe_session
 import helpers
 
+# ==================== 原生 API 直連繞過機制 (429 Bypass) ====================
+def fetch_historical_data_direct_fallback(ticker, range_str="6mo"):
+    """
+    當 yfinance 遭到 429 封鎖時，此函式使用原生 requests 直接連線 Yahoo Query1 Chart API。
+    搭配偽裝隨機 Chrome/Safari 標頭與直接 JSON 解析，高機率繞過 429 限制！ [1]
+    """
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, Gecko) Version/17.2 Safari/605.1.15",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ]
+    
+    # 轉換 period 為 Chart API 採用的 range 參數
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={range_str}&interval=1d"
+    headers = {
+        "User-Agent": random.choice(user_agents),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://finance.yahoo.com/"
+    }
+    
+    for s in [std_requests, unsafe_session]:
+        try:
+            res = s.get(url, headers=headers, timeout=6, verify=False)
+            if res.status_code == 200:
+                json_data = res.json()
+                chart = json_data.get("chart", {})
+                result = chart.get("result", [])
+                if result:
+                    res_data = result[0]
+                    timestamp = res_data.get("timestamp", [])
+                    indicators = res_data.get("indicators", {})
+                    quote = indicators.get("quote", [{}])[0]
+                    adjclose = indicators.get("adjclose", [{}])[0].get("adjclose", [])
+                    
+                    # 擷取 K 線數據
+                    opens = quote.get("open", [])
+                    highs = quote.get("high", [])
+                    lows = quote.get("low", [])
+                    closes = quote.get("close", []) if not adjclose else adjclose  # 優先採用調整後收盤價
+                    volumes = quote.get("volume", [])
+                    
+                    # 擷取歷史配息事件 (確保 ETF 功能不受影響) [1]
+                    dividends_col = [0.0] * len(timestamp)
+                    events = res_data.get("events", {})
+                    dividends_data = events.get("dividends", {})
+                    if dividends_data:
+                        for ts_str, div_info in dividends_data.items():
+                            try:
+                                ts_val = int(ts_str)
+                                if ts_val in timestamp:
+                                    idx = timestamp.index(ts_val)
+                                    dividends_col[idx] = float(div_info.get("amount", 0.0))
+                            except:
+                                pass
+                    
+                    # 轉換為 Pandas DataFrame (欄位與 yfinance 保持完全一致)
+                    if timestamp and opens and closes:
+                        dates = [datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=8))) for ts in timestamp]
+                        df = pd.DataFrame({
+                            "Open": opens,
+                            "High": highs,
+                            "Low": lows,
+                            "Close": closes,
+                            "Volume": volumes,
+                            "Dividends": dividends_col,
+                            "Stock Splits": [0.0] * len(timestamp)
+                        }, index=dates)
+                        
+                        df = df.dropna(subset=["Close"])
+                        if not df.empty:
+                            return df
+        except Exception:
+            pass
+    return pd.DataFrame()
+
 # ==================== 歷史資料全域安全快取 ====================
 @st.cache_data(ttl=14400)
 def fetch_historical_data_cached(ticker, period="6mo"):
+    # 1. 優先嘗試標準 yfinance 抓取
     try:
         stock = yf.Ticker(ticker, session=unsafe_session)
         hist = stock.history(period=period)
+        if hist is not None and not hist.empty:
+            return hist
+    except Exception:
+        pass
         
-        # 💡 核心修正：如果抓到空資料，拋出錯誤，讓 Streamlit 不要快取這一次的「失敗空值」！
-        if hist is None or hist.empty:
-            raise ValueError(f"Yahoo Finance returned empty data for {ticker}")
-        return hist
-    except Exception as e:
-        # 拋出錯誤以阻止 Streamlit 快取失敗的空值 (None)
-        raise RuntimeError(f"Failed to fetch {ticker}: {str(e)}")
+    # 2. 若被 429 阻擋或出錯，立即自動啟用「原生 JSON 直接連線自癒機制」繞過封鎖 [1]
+    hist_fallback = fetch_historical_data_direct_fallback(ticker, range_str=period)
+    if hist_fallback is not None and not hist_fallback.empty:
+        return hist_fallback
+        
+    # 兩者皆墨才拋出錯誤，確保 Streamlit 不快取失敗空值 [1]
+    raise RuntimeError(f"Yahoo Finance standard and fallback direct API both failed for {ticker}")
 
 # ==================== 上市法人買賣超資料抓取 (TWSE) ====================
 def fetch_twse_t86(date_str):
@@ -63,7 +146,6 @@ def fetch_tpex_t86(date_str):
     """
     抓取櫃買中心(TPEx)上櫃法人買賣超日報
     """
-    # 將西元年轉換為民國年格式, 例如 "20260813" -> "115/08/13"
     try:
         year = int(date_str[:4])
         month = date_str[4:6]
@@ -82,25 +164,22 @@ def fetch_tpex_t86(date_str):
         if res.status_code != 200: return None
         json_data = res.json()
         
-        # 櫃買中心法人進出資料存放在 aaData 欄位中
         data = json_data.get("aaData")
         if not data: return None
         
         rows = []
         for r in data:
-            if len(r) >= 24: # 確保欄位數完整
+            if len(r) >= 24:
                 code = str(r[0]).strip()
                 name = str(r[1]).strip()
                 
-                # 僅篩選 4~6 碼正常證券代號
                 if not re.match(r'^[a-zA-Z0-9]{4,6}$', code):
                     continue
                     
                 try:
-                    # 櫃買中心回傳單位為原始股數 (與證交所一致)
-                    foreign_val = float(str(r[4]).replace(',', '')) # 外陸資買賣超股數(不含自營商)
-                    trust_val = float(str(r[13]).replace(',', '')) # 投信買賣超股數
-                    dealer_val = float(str(r[22]).replace(',', '')) # 自營商買賣超股數合計
+                    foreign_val = float(str(r[4]).replace(',', ''))
+                    trust_val = float(str(r[13]).replace(',', ''))
+                    dealer_val = float(str(r[22]).replace(',', ''))
                     
                     rows.append({
                         "證券代號": code,
@@ -118,15 +197,11 @@ def fetch_tpex_t86(date_str):
 
 # ==================== 全市場信用交易融資餘額抓取 ====================
 def fetch_all_margin(date_str):
-    """
-    綜合抓取 上市 (證交所) 與 上櫃 (櫃買中心) 的全市場信用交易融資餘額變動
-    """
     margin_dict = {}
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
-    # 1. 抓取上市 (TWSE) 融資數據
     url_twse = f"https://www.twse.com.tw/exchangeReport/MI_MARGN?response=json&date={date_str}&selectType=ALL"
     try:
         res = unsafe_session.get(url_twse, headers=headers, timeout=8, verify=False)
@@ -154,7 +229,6 @@ def fetch_all_margin(date_str):
     except Exception:
         pass
         
-    # 2. 抓取上櫃 (TPEx) 融資數據
     url_tpex = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_margin_balance"
     try:
         res = unsafe_session.get(url_tpex, headers=headers, timeout=8, verify=False)
@@ -192,14 +266,12 @@ def fetch_monthly_revenue():
     }
     revenue_dict = {}
     
-    # 策略 1: 嘗試新版 JSON OpenAPI
     urls_json = [
-        "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",           # 上市月營收 JSON
-        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"          # 上櫃月營收 JSON
+        "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",
+        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"
     ]
     
     for url in urls_json:
-        # 使用雙層 Session 設計以防連線阻擋
         for s in [std_requests, unsafe_session]:
             try:
                 res = s.get(url, headers=headers, timeout=8, verify=False)
@@ -214,7 +286,7 @@ def fetch_monthly_revenue():
                                 code_k = k
                             elif any(term in k_str for term in ["去年同月增減", "去年同月比", "YoY", "yoy", "去年同期", "LastYearCompare"]):
                                 yoy_k = k
-                            elif any(term in k_str for term in ["上月比較增減", "上月增減", "MoM", "mom", "上月比", "PrevMonthCompare"]):
+                            elif any(term in k_str for term in ["上文比較增減", "上月增減", "MoM", "mom", "上月比", "PrevMonthCompare"]):
                                 mom_k = k
                         
                         if not code_k:
@@ -248,11 +320,10 @@ def fetch_monthly_revenue():
                                     }
                                 except:
                                     continue
-                            break # 成功抓到一組 JSON 即可跳出
+                            break
             except Exception:
                 pass
                 
-    # 策略 2: 如果 JSON 被雲端主機屏蔽，自動退回到穩定的 mops 原始 CSV 機制
     if not revenue_dict:
         urls_csv = [
             "https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv",
@@ -300,9 +371,6 @@ def fetch_monthly_revenue():
 
 # ==================== 毫秒級個股/ETF 中文名稱搜尋 ====================
 def fetch_stock_name_fast(code):
-    """
-    精確爬取 Yahoo 股市台灣網頁標題，確保 100% 取得繁體中文名稱，避免雲端主機因海外 IP 讀取到英文
-    """
     url = f"https://tw.stock.yahoo.com/quote/{code}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -313,14 +381,12 @@ def fetch_stock_name_fast(code):
             soup = BeautifulSoup(res.text, "html.parser")
             title = soup.find("title").text
             if title:
-                # 範例："鴻準 (2354) - 股價" -> 取得括號前的 "鴻準"
                 name = title.split("(")[0].strip()
                 if name and "網頁搜尋" not in name and "Yahoo" not in name:
                     return name
     except Exception:
         pass
 
-    # 備份原有 query1 Search API 機制
     url_backup = f"https://query1.finance.yahoo.com/v1/finance/search?q={code}&lang=zh-Hant-TW&quotesCount=1"
     try:
         res = unsafe_session.get(url_backup, headers=headers, timeout=5, verify=False)
@@ -356,14 +422,10 @@ def get_recent_data(days_count=3, progress_callback=None):
         if progress_callback:
             progress_callback(len(valid_dfs) + 1, days_count, date_str)
             
-        # 1. 抓取上市 T86 三大法人資料
         df_twse = fetch_twse_t86(date_str)
-        time.sleep(0.3) # 稍微睡眠，防止請求過於頻繁被櫃買中心或證交所阻擋
-        
-        # 2. 抓取上櫃三大法人資料
+        time.sleep(0.3)
         df_tpex = fetch_tpex_t86(date_str)
         
-        # 3. 雙市場融合 (上市 + 上櫃 資料流合併)
         df_combined = None
         if df_twse is not None and df_tpex is not None:
             df_combined = pd.concat([df_twse, df_tpex], ignore_index=True)
@@ -403,7 +465,7 @@ def fetch_twd_data():
         pass
     return twd_str
 
-# ==================== 集保大戶比例 CSV 串流解析 (安全升級版) ====================
+# ==================== 集保大戶比例 CSV 串流解析 ====================
 def fetch_tdcc_data():
     url = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5"
     headers = {
@@ -577,18 +639,14 @@ def fetch_moneydj_pre_dividend(code):
 def fetch_etf_dividend_details(code, upcoming_dict):
     ticker_tw = f"{code}.TW"
     try:
-        # 呼叫快取，如果失敗它會自動拋出 Error，並被下方的 except 捕獲
         hist = fetch_historical_data_cached(ticker_tw, period="1y")
     except Exception:
-        # .TW 失敗了，嘗試 .TWO
         try:
             ticker_two = f"{code}.TWO"
             hist = fetch_historical_data_cached(ticker_two, period="1y")
         except Exception:
-            # 兩邊都失敗則返回 None，且此失敗「不會」被寫入 Streamlit 快取中
             return None
             
-    # 當順利取得 K 線 DataFrame 時，才繼續執行後續的運算
     try:
         price = hist['Close'].iloc[-1]
         prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
@@ -698,7 +756,6 @@ def fetch_stock_top_brokers(code, days=5):
     """
     爬取指定個股全台「買超」與「賣超」前 10 名的分點券商排行
     """
-    # 💡 升級：籌碼天數支援 15 天對照 [2]
     days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
@@ -716,19 +773,16 @@ def fetch_stock_top_brokers(code, days=5):
             html = res.content.decode('big5', errors='ignore')
             soup = BeautifulSoup(html, 'html.parser')
             
-            # 尋找網頁中包含「買超券商」與「賣超券商」的表格
             rows = soup.find_all('tr')
             for row in rows:
                 tds = row.find_all('td')
-                # ZCO 表格左右分流：左邊是買超，右邊是賣超
                 if len(tds) >= 10:
                     b_name = tds[0].text.strip()
-                    b_net = tds[3].text.strip().replace(',', '') # 淨買超張數
+                    b_net = tds[3].text.strip().replace(',', '')
                     
                     s_name = tds[5].text.strip()
-                    s_net = tds[8].text.strip().replace(',', '') # 淨賣超張數
+                    s_net = tds[8].text.strip().replace(',', '')
                     
-                    # 過濾表頭雜訊，只取數字
                     try:
                         b_val = int(b_net)
                         if b_val > 0 and b_name and "券商" not in b_name:
@@ -745,7 +799,6 @@ def fetch_stock_top_brokers(code, days=5):
     except Exception as e:
         print(f"Error fetching top brokers for {code}: {e}")
         
-    # 只取前 10 名
     return buyers[:10], sellers[:10]
 
 def fetch_broker_net_buys(broker_id, days):
@@ -812,31 +865,25 @@ def fetch_broker_net_buys(broker_id, days):
     return broker_dict
 
 # ==================== 全市場上市櫃股票實收資本額 (股本) 抓取 (自癒雙模版) ====================
-@st.cache_data(ttl=14400) # 快取 4 小時防止重複請求
+@st.cache_data(ttl=14400)
 def fetch_stock_capitals():
-    """
-    對接證交所與櫃買中心基本資料，優先採用 JSON OpenAPI，若連線遭屏蔽則自動回退至穩定 MOPS (CSV)
-    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     capital_dict = {}
     
-    # 策略 1: 嘗試 JSON OpenAPI 網域
     urls_json = [
-        ("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", True),    # 上市
-        ("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", False) # 上櫃
+        ("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", True),
+        ("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", False)
     ]
     
     for url, is_listed in urls_json:
-        # 雙層 Session 連線防阻擋
         for s in [std_requests, unsafe_session]:
             try:
                 res = s.get(url, headers=headers, timeout=8, verify=False)
                 if res.status_code == 200:
                     data = res.json()
                     if data and isinstance(data, list):
-                        # 自動對齊中文與英文鍵名
                         first_row = data[0]
                         code_k = None
                         cap_k = None
@@ -850,7 +897,6 @@ def fetch_stock_capitals():
                                 if k_str == "SecuritiesCompanyCode": code_k = k
                                 elif k_str in ("PaidInCapital", "實收資本額") or "capital" in k_str.lower(): cap_k = k
                         
-                        # 模糊比對備用
                         if not code_k:
                             code_k = next((k for k in first_row.keys() if "代號" in str(k) or "code" in str(k).lower() or "Securities" in str(k)), None)
                         if not cap_k:
@@ -864,19 +910,17 @@ def fetch_stock_capitals():
                                 try:
                                     cap_str = str(row.get(cap_k, "0")).replace(',', '').strip()
                                     cap_val = float(cap_str)
-                                    # 將原始金額 (元) 轉換為以「億元」為單位，取至小數點後兩位
                                     capital_dict[code] = round(cap_val / 100000000.0, 2)
                                 except (ValueError, TypeError):
                                     continue
-                            break # 成功即跳出
+                            break
             except Exception:
                 pass
                 
-    # 策略 2: 若 JSON 端點遭雲端主機（Streamlit Cloud）TLS/憑證阻擋，自動回退至 CSV 備用伺服器
     if not capital_dict:
         urls_csv = [
-            ("https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv", True),   # 上市 CSV
-            ("https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv", False)  # 上櫃 CSV
+            ("https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv", True),
+            ("https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv", False)
         ]
         for url, is_listed in urls_csv:
             for s in [std_requests, unsafe_session]:
@@ -887,7 +931,7 @@ def fetch_stock_capitals():
                         df = pd.read_csv(StringIO(csv_text))
                         df.columns = [c.strip() for c in df.columns]
                         
-                        code_col = "公司代號" if is_listed else "公司代號" # MOPS CSV 通常均為中文
+                        code_col = "公司代號"
                         cap_col = "實收資本額"
                         
                         if code_col in df.columns and cap_col in df.columns:
