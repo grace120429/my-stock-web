@@ -1,6 +1,7 @@
 # tab4_etfs.py
 import streamlit as st
 import pandas as pd
+import time  # 💡 修正：補上漏掉的時鐘模組導入 [1]
 from datetime import datetime, timezone, timedelta
 import data_fetcher
 import storage
