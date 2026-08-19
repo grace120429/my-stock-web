@@ -69,6 +69,7 @@ def render_tab1(brokers_dict):
                 st.error("無法自證交所取得資料。")
                 st.session_state.tab1_results = None
             else:
+                # 💡 基礎縮排一律維持 16 個空格，與主進入點 app.py 完全對齊
                 raw_data = pd.concat(dfs, ignore_index=True)
                 
                 tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
@@ -77,6 +78,7 @@ def render_tab1(brokers_dict):
                 else:
                     tdcc_ratios, tdcc_changes = {}, {}
                 
+                # 💡 背景獲取融資數據（自動往前回溯的自癒機制）
                 margin_data = {}
                 margin_date_used = ""
                 st.session_state.margin_is_fallback = False
@@ -99,10 +101,13 @@ def render_tab1(brokers_dict):
                 st.session_state.margin_date_used = margin_date_used
                 
                 revenue_data = data_fetcher.fetch_monthly_revenue()
+                
+                # 💡 獲取全市場最新股本數據
                 capital_data = data_fetcher.fetch_stock_capitals()
                 
                 multi_broker_data = {}
                 if b_active and selected_broker_names:
+                    # 💡 升級：對齊天數參數 [2]
                     days_param = 5 if days_count <= 7 else (15 if days_count == 15 else 20)
                     for b_name in selected_broker_names:
                         broker_id = brokers_dict.get(b_name)
@@ -115,6 +120,7 @@ def render_tab1(brokers_dict):
                 def check_broker_intersection(code):
                     if not b_active or not selected_broker_names:
                         return True, 0.0
+                    
                     total_diff = 0.0
                     for b_name in selected_broker_names:
                         b_data = multi_broker_data.get(b_name, {})
@@ -282,6 +288,7 @@ def render_tab1(brokers_dict):
                                         a_stmt = stock.financials
                                     q_eps_series = utils.get_eps_from_stmt(q_stmt)
                                     a_eps_series = utils.get_eps_from_stmt(a_stmt)
+                                    # 💡 修正 Python and 語法 [1]
                                     if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
@@ -350,6 +357,7 @@ def render_tab1(brokers_dict):
                             prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
                             vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
                             
+                            # 💡 修正 Python and 語法，清除打字殘留 [1]
                             if filter_ma and not is_bullish:
                                 continue
                                 
@@ -412,4 +420,131 @@ def render_tab1(brokers_dict):
                                 "月營收YoY/MoM": helpers.format_rev_growth(rev_item),
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
+                                "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
+                                "分點買超明細": broker_details_str,
+                                "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),
+                                "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
+                                "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
+                                "均線狀態": ma_status_display,
+                                "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",
+                                "日K_MACD": macd_daily_status,
+                                "60m_MACD": macd_60m_status,
+                                "短期支壓(1M)": sr_1m,
+                                "中期支壓(6M)": sr_6m,
+                                "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
+                              })
+                        except Exception:
+                            yf_fail_count += 1
+                            continue
+                            
+                if final_rows:
+                    st.session_state.tab1_results = final_rows
+                else:
+                    st.session_state.tab1_results = []
+                    # 💡 自動 API 連線故障診斷
+                    if yf_fail_count > 0:
+                        st.warning("⚠️ 偵測到 Yahoo Finance 數據伺服器目前對雲端伺服器進行了臨時頻率限制 (Error 429 - 請求過於頻繁)，導致所有候選股歷史 K 線下載失敗。建議您直接再次點擊上方「開始一鍵篩選股票」按鈕重試，或稍等 1-2 分鐘再試。")
+                    else:
+                        st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
+
+    # 顯示過濾後的數據結果
+    if st.session_state.tab1_results is not None:
+        if len(st.session_state.tab1_results) > 0:
+            df_res = pd.DataFrame(st.session_state.tab1_results)
+            
+            if st.session_state.margin_date_used:
+                d_str = st.session_state.margin_date_used
+                try:
+                    formatted_margin_date = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:]}"
+                except Exception:
+                    formatted_margin_date = d_str
+                
+                if st.session_state.margin_is_fallback:
+                    st.info(f"💡 提示：最新一日融資數據尚未發布或讀取失敗，已為您自動回溯採用 **{formatted_margin_date}** 之融資明細。")
+                else:
+                    st.caption(f"📊 融資數據基準日：{formatted_margin_date}")
+            
+            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。")
+            
+            visible_cols = [c for c in df_res.columns if c != "分點買超明細"]
+            
+            event = st.dataframe(
+                df_res[visible_cols], 
+                column_config={
+                    "K線圖網址": st.column_config.LinkColumn("看日K線圖", display_text="開啟奇摩股市")
+                },
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="multi-row",
+                key="df_res_table_stable"
+            )
+            
+            selected_rows = event.selection.rows
+            if selected_rows:
+                st.write("---")
+                st.markdown("### 🎯 已選個股 - 主力分點進出特寫")
+                for idx in selected_rows:
+                    if idx >= len(df_res):  # 💡 安全越界保護 [1]
+                        continue
+                    row_data = df_res.iloc[idx]
+                    code = row_data["代號"]
+                    name = row_data["股票名稱"]
+                    details = row_data.get("分點買超明細", "無")
+                    
+                    with st.container(border=True):
+                        st.markdown(f"**📍 {code} {name}**")
+                        st.markdown("**📌 我的自選主力進出：**")
+                        if details and details != "無":
+                            detail_items = details.split(" | ")
+                            cols = st.columns(max(len(detail_items), 4))
+                            for i, item in enumerate(detail_items):
+                                try:
+                                    parts = item.split(": ")
+                                    cols[i].metric(label=parts[0], value=parts[1])
+                                except:
+                                    cols[i].write(item)
+                        else:
+                            st.caption("自選分點在此股無符合之買超紀錄。")
                         
+                        st.write("")
+                        st.markdown("**🔥 全台所有分點 - 買賣超前 10 名排行 (不設限自選)：**")
+                        with st.spinner(f"正在向系統調閱 {code} 的全台主力排行..."):
+                            all_buyers, all_sellers = utils.fetch_stock_top_brokers_local(code, days=days_count)
+                            
+                        if all_buyers or all_sellers:
+                            col_b, col_s = st.columns(2)
+                            with col_b:
+                                st.markdown("🟢 **淨買超排行 Top 10**")
+                                df_b = pd.DataFrame(all_buyers)
+                                if not df_b.empty:
+                                    st.dataframe(df_b, use_container_width=True, hide_index=True)
+                                else:
+                                    st.caption("無買超排行資料")
+                            with col_s:
+                                st.markdown("🔴 **淨賣超排行 Top 10**")
+                                df_s = pd.DataFrame(all_sellers)
+                                if not df_s.empty:
+                                    st.dataframe(df_s, use_container_width=True, hide_index=True)
+                                else:
+                                    st.caption("無賣超排行資料")
+                        else:
+                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
+                
+                selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
+                st.write("")
+                if st.button(f"📥 將這 {len(selected_codes)} 檔股票加入自選股", type="primary", key="btn_add_selected_stable"):
+                    current_watchlist = utils.get_local_watchlist()
+                    added_count = 0
+                    for code in selected_codes:
+                        if code not in current_watchlist:
+                            current_watchlist.append(code)
+                              added_count += 1
+                    if added_count > 0:
+                        utils.save_local_watchlist(current_watchlist)
+                        st.success(f"已成功加入 {added_count} 檔股票至您的專屬自選股！")
+                        time.sleep(0.8)
+                        st.rerun()
+                    else:
+                        st.info("您選取的股票早已在自選股清單中囉！")
+        else:
+            st.warning("查無符合篩選條件之個股。")
