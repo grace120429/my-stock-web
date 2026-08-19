@@ -185,7 +185,6 @@ def fetch_all_margin(date_str):
         
     return margin_dict
 
-# ==================== 公開資訊觀測站每月營收 CSV 抓取 ====================
 # ==================== 證交所與櫃買中心每月營收 OpenAPI JSON 抓取 ====================
 def fetch_monthly_revenue():
     headers = {
@@ -193,7 +192,7 @@ def fetch_monthly_revenue():
     }
     revenue_dict = {}
     
-    # 採用證交所與櫃買中心全新升級的 JSON OpenAPI 串接端點
+    # 採用證交所與櫃買中心全新升級的 JSON OpenAPI 串接端點 [1]
     urls = [
         "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",           # 上市公司月營收 JSON 端點
         "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"          # 上櫃公司月營收 JSON 端點
@@ -660,72 +659,13 @@ def fetch_etf_dividend_details(code, upcoming_dict):
     except Exception as e:
         print(f"Error fetching ETF {code}: {e}")
         return None
-# ==================== 全市場上市櫃股票實收資本額 (股本) 抓取 ====================
-@st.cache_data(ttl=14400) # 快取 4 小時防止重複請求
-def fetch_stock_capitals():
-    """
-    對接證交所與櫃買中心基本資料 API，動態解析並回傳全台股實收資本額 (單位: 億元)
-    """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    capital_dict = {}
-    
-    # 宣告上市、上櫃基本資料端點
-    urls = [
-        ("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", True),    # 上市
-        ("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", False) # 上櫃
-    ]
-    
-    for url, is_listed in urls:
-        try:
-            res = unsafe_session.get(url, headers=headers, timeout=10, verify=False)
-            if res.status_code == 200:
-                data = res.json()
-                if not data or not isinstance(data, list):
-                    continue
-                
-                # 自動對齊中文與英文鍵名
-                first_row = data[0]
-                code_k = None
-                cap_k = None
-                
-                for k in first_row.keys():
-                    k_str = str(k).strip()
-                    if is_listed:
-                        if k_str == "公司代號": code_k = k
-                        elif k_str == "實收資本額": cap_k = k
-                    else:
-                        if k_str == "SecuritiesCompanyCode": code_k = k
-                        elif k_str in ("PaidInCapital", "實收資本額") or "capital" in k_str.lower(): cap_k = k
-                
-                # 模糊比對備用
-                if not code_k:
-                    code_k = next((k for k in first_row.keys() if "代號" in str(k) or "code" in str(k).lower() or "Securities" in str(k)), None)
-                if not cap_k:
-                    cap_k = next((k for k in first_row.keys() if "資本" in str(k) or "Capital" in str(k) or "capital" in str(k).lower()), None)
-                
-                if code_k and cap_k:
-                    for row in data:
-                        code = str(row.get(code_k, "")).strip()
-                        if not code or code == "nan":
-                            continue
-                        try:
-                            cap_str = str(row.get(cap_k, "0")).replace(',', '').strip()
-                            cap_val = float(cap_str)
-                            # 將原始金額 (元) 轉換為以「億元」為單位，取至小數點後兩位
-                            capital_dict[code] = round(cap_val / 100000000.0, 2)
-                        except (ValueError, TypeError):
-                            continue
-        except Exception:
-            pass
-            
-    return capital_dict
+
 # ==================== 主力券商特定統計天數交易資料抓取 ====================
 def fetch_stock_top_brokers(code, days=5):
     """
     爬取指定個股全台「買超」與「賣超」前 10 名的分點券商排行
     """
+    # 💡 升級：籌碼天數支援 15 天對照 [2]
     days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
@@ -837,3 +777,65 @@ def fetch_broker_net_buys(broker_id, days):
     except Exception:
         pass
     return broker_dict
+
+# ==================== 全市場上市櫃股票實收資本額 (股本) 抓取 ====================
+@st.cache_data(ttl=14400) # 快取 4 小時防止重複請求
+def fetch_stock_capitals():
+    """
+    對接證交所與櫃買中心基本資料 API，動態解析並回傳全台股實收資本額 (單位: 億元)
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    capital_dict = {}
+    
+    # 宣告上市、上櫃基本資料端點
+    urls = [
+        ("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", True),    # 上市
+        ("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", False) # 上櫃
+    ]
+    
+    for url, is_listed in urls:
+        try:
+            res = unsafe_session.get(url, headers=headers, timeout=10, verify=False)
+            if res.status_code == 200:
+                data = res.json()
+                if not data or not isinstance(data, list):
+                    continue
+                
+                # 自動對齊中文與英文鍵名
+                first_row = data[0]
+                code_k = None
+                cap_k = None
+                
+                for k in first_row.keys():
+                    k_str = str(k).strip()
+                    if is_listed:
+                        if k_str == "公司代號": code_k = k
+                        elif k_str == "實收資本額": cap_k = k
+                    else:
+                        if k_str == "SecuritiesCompanyCode": code_k = k
+                        elif k_str in ("PaidInCapital", "實收資本額") or "capital" in k_str.lower(): cap_k = k
+                
+                # 模糊比對備用
+                if not code_k:
+                    code_k = next((k for k in first_row.keys() if "代號" in str(k) or "code" in str(k).lower() or "Securities" in str(k)), None)
+                if not cap_k:
+                    cap_k = next((k for k in first_row.keys() if "資本" in str(k) or "Capital" in str(k) or "capital" in str(k).lower()), None)
+                
+                if code_k and cap_k:
+                    for row in data:
+                        code = str(row.get(code_k, "")).strip()
+                        if not code or code == "nan":
+                            continue
+                        try:
+                            cap_str = str(row.get(cap_k, "0")).replace(',', '').strip()
+                            cap_val = float(cap_str)
+                            # 將原始金額 (元) 轉換為以「億元」為單位，取至小數點後兩位
+                            capital_dict[code] = round(cap_val / 100000000.0, 2)
+                        except (ValueError, TypeError):
+                            continue
+        except Exception:
+            pass
+            
+    return capital_dict
