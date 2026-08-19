@@ -2,7 +2,9 @@
 import streamlit as st
 import time
 from datetime import datetime, timezone, timedelta
-import utils
+
+# 💡 安全重定向引進 [1]
+import app_utils as utils
 
 def render_tab5():
     st.subheader("💬 讀者交流留言區")
