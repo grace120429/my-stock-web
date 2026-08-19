@@ -1067,3 +1067,70 @@ def fetch_stock_capitals():
                     pass
             
     return capital_dict
+# ==================== 一鍵抓取全市場當日收盤行情快照 (極速防阻擋) ====================
+@st.cache_data(ttl=1800)  # 快取 30 分鐘，兼顧即時性與防刷限制
+def fetch_all_daily_prices():
+    """
+    一鍵抓取全市場「上市」與「上櫃」所有個股的當日收盤價、漲跌幅行情快照。
+    上市對接證交所 STOCK_DAY_ALL
+    上櫃對接櫃買中心 tpex_mainboard_daily_close_quotes
+    只需 2 個 HTTP 請求即可獲取全台股 2000 檔個股現價，完全避免迴圈請求導致的 429 阻擋！
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    price_dict = {}
+    
+    # 1. 抓取上市個股當日行情
+    url_twse = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+    try:
+        res = std_requests.get(url_twse, headers=headers, timeout=10, verify=False)
+        if res.status_code == 200:
+            data = res.json()
+            if isinstance(data, list):
+                for row in data:
+                    code = str(row.get("Code", "")).strip()
+                    if code:
+                        try:
+                            p_close = float(row.get("Close", "0"))
+                            p_change = float(row.get("Change", "0"))
+                            price_dict[code] = {
+                                "price": p_close,
+                                "change": p_change,
+                                "pct_change": round((p_change / (p_close - p_change)) * 100, 2) if (p_close - p_change) > 0 else 0.0
+                            }
+                        except:
+                            continue
+    except Exception:
+        pass
+        
+    # 2. 抓取上櫃個股當日行情
+    url_tpex = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+    try:
+        res = std_requests.get(url_tpex, headers=headers, timeout=10, verify=False)
+        if res.status_code == 200:
+            data = res.json()
+            if isinstance(data, list):
+                for row in data:
+                    code = str(row.get("SecuritiesCompanyCode", "")).strip()
+                    if code:
+                        try:
+                            # 櫃買數據清洗多餘空白與逗號
+                            close_str = str(row.get("Close", "0")).replace(',', '').strip()
+                            change_str = str(row.get("PriceChange", "0")).replace(',', '').strip()
+                            
+                            p_close = float(close_str) if close_str and close_str != "None" else 0.0
+                            p_change = float(change_str) if change_str and change_str != "None" else 0.0
+                            
+                            if p_close > 0:
+                                price_dict[code] = {
+                                    "price": p_close,
+                                    "change": p_change,
+                                    "pct_change": round((p_change / (p_close - p_change)) * 100, 2) if (p_close - p_change) > 0 else 0.0
+                                }
+                        except:
+                            continue
+    except Exception:
+        pass
+        
+    return price_dict
