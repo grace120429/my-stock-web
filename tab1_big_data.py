@@ -271,7 +271,7 @@ def render_tab1(brokers_dict):
                             try:
                                 time.sleep(0.15)
                                 
-                                # 雙後綴自癒機制 [1]
+                                # 💡 修正後：雙後綴自癒機制，優先嘗試 .TW，失敗時自動進入 except 並嘗試 .TWO [1]
                                 try:
                                     if ticker in st.session_state.yf_cache:
                                         hist = st.session_state.yf_cache[ticker]
@@ -413,7 +413,7 @@ def render_tab1(brokers_dict):
                             "代號": code,
                             "股票名稱": name,
                             "收盤價": round(price, 1),
-                            "股本(億)": stock_cap if stock_cap > 0 else None,
+                            "股本(億)": stock_cap if stock_cap > 0 else None,  # 💡 整合股本欄位
                             "漲跌幅(%)": round(pct_change, 2),
                             "最新單季EPS": latest_q_eps_val,
                             "去年年度EPS": latest_a_eps_val,
