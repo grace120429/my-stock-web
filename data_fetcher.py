@@ -185,84 +185,117 @@ def fetch_all_margin(date_str):
         
     return margin_dict
 
-# ==================== 證交所與櫃買中心每月營收 OpenAPI JSON 抓取 ====================
+# ==================== 證交所與櫃買中心每月營收 OpenAPI JSON 抓取 (自癒雙模版) ====================
 def fetch_monthly_revenue():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     revenue_dict = {}
     
-    # 採用證交所與櫃買中心全新升級的 JSON OpenAPI 串接端點 [1]
-    urls = [
-        "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",           # 上市公司月營收 JSON 端點
-        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"          # 上櫃公司月營收 JSON 端點
+    # 策略 1: 嘗試新版 JSON OpenAPI
+    urls_json = [
+        "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",           # 上市月營收 JSON
+        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"          # 上櫃月營收 JSON
     ]
     
-    for url in urls:
-        try:
-            res = unsafe_session.get(url, headers=headers, timeout=10, verify=False)
-            if res.status_code == 200:
-                data = res.json()
-                if not data or not isinstance(data, list):
-                    continue
-                
-                # 動態探測首筆數據以取得欄位鍵名
-                first_row = data[0]
-                code_k, yoy_k, mom_k = None, None, None
-                for k in first_row.keys():
-                    k_str = str(k).strip()
-                    # 偵測公司代號鍵名（相容中文與英文欄位）
-                    if k_str in ("公司代號", "SecuritiesCompanyCode", "CompanyCode", "SecuritiesCode", "代號", "代碼", "公司代碼"):
-                        code_k = k
-                    # 偵測比去年同月增減 (YoY) 鍵名
-                    elif any(term in k_str for term in ["去年同月增減", "去年同月比", "YoY", "yoy", "去年同期", "LastYearCompare"]):
-                        yoy_k = k
-                    # 偵測比上月比較增減 (MoM) 鍵名
-                    elif any(term in k_str for term in ["上月比較增減", "上月增減", "MoM", "mom", "上月比", "PrevMonthCompare"]):
-                        mom_k = k
-                
-                # 模糊比對備用機制
-                if not code_k:
-                    code_k = next((k for k in first_row.keys() if "代號" in str(k) or "code" in str(k).lower() or "Securities" in str(k)), None)
-                if not yoy_k:
-                    yoy_k = next((k for k in first_row.keys() if "去年" in str(k) or "yoy" in str(k).lower() or "LastYear" in str(k)), None)
-                if not mom_k:
-                    mom_k = next((k for k in first_row.keys() if "上月" in str(k) or "mom" in str(k).lower() or "PrevMonth" in str(k)), None)
-                
-                if code_k and yoy_k and mom_k:
-                    for row in data:
-                        code = str(row.get(code_k, "")).strip()
-                        if not code or code == "nan":
-                            continue
+    for url in urls_json:
+        # 使用雙層 Session 設計以防連線阻擋
+        for s in [std_requests, unsafe_session]:
+            try:
+                res = s.get(url, headers=headers, timeout=8, verify=False)
+                if res.status_code == 200:
+                    data = res.json()
+                    if data and isinstance(data, list):
+                        first_row = data[0]
+                        code_k, yoy_k, mom_k = None, None, None
+                        for k in first_row.keys():
+                            k_str = str(k).strip()
+                            if k_str in ("公司代號", "SecuritiesCompanyCode", "CompanyCode", "SecuritiesCode", "代號", "代碼", "公司代碼"):
+                                code_k = k
+                            elif any(term in k_str for term in ["去年同月增減", "去年同月比", "YoY", "yoy", "去年同期", "LastYearCompare"]):
+                                yoy_k = k
+                            elif any(term in k_str for term in ["上月比較增減", "上月增減", "MoM", "mom", "上月比", "PrevMonthCompare"]):
+                                mom_k = k
                         
-                        try:
-                            # 數值清洗，移除百分比與千分位逗號
-                            yoy_str = str(row.get(yoy_k, "0")).replace('%', '').replace(',', '').strip()
-                            mom_str = str(row.get(mom_k, "0")).replace('%', '').replace(',', '').strip()
-                            
-                            # 過濾無效字元
-                            yoy_val = float(yoy_str) if yoy_str and yoy_str not in ('－', '-', 'N/A') else 0.0
-                            mom_val = float(mom_str) if mom_str and mom_str not in ('－', '-', 'N/A') else 0.0
-                            
-                            # 出表年月或資料年月偵測
-                            period_k = next((k for k in row.keys() if "年月" in str(k) or "Period" in str(k)), "N/A")
-                            period_val = str(row.get(period_k, ""))
-                            
-                            # 營收當月金額偵測
-                            rev_k = next((k for k in row.keys() if "當月營收" in str(k) or "Revenue" in str(k)), None)
-                            rev_val = float(str(row.get(rev_k, "0")).replace(',', '')) if rev_k else 0.0
-                            
-                            revenue_dict[code] = {
-                                "period": period_val,
-                                "revenue": rev_val,
-                                "yoy": yoy_val,
-                                "mom": mom_val
-                            }
-                        except (ValueError, TypeError):
-                            continue
-        except Exception:
-            pass
-            
+                        if not code_k:
+                            code_k = next((k for k in first_row.keys() if "代號" in str(k) or "code" in str(k).lower()), None)
+                        if not yoy_k:
+                            yoy_k = next((k for k in first_row.keys() if "去年" in str(k) or "yoy" in str(k).lower()), None)
+                        if not mom_k:
+                            mom_k = next((k for k in first_row.keys() if "上月" in str(k) or "mom" in str(k).lower()), None)
+                        
+                        if code_k and yoy_k and mom_k:
+                            for row in data:
+                                code = str(row.get(code_k, "")).strip()
+                                if not code or code == "nan":
+                                    continue
+                                try:
+                                    yoy_str = str(row.get(yoy_k, "0")).replace('%', '').replace(',', '').strip()
+                                    mom_str = str(row.get(mom_k, "0")).replace('%', '').replace(',', '').strip()
+                                    yoy_val = float(yoy_str) if yoy_str and yoy_str not in ('－', '-', 'N/A') else 0.0
+                                    mom_val = float(mom_str) if mom_str and mom_str not in ('－', '-', 'N/A') else 0.0
+                                    
+                                    period_k = next((k for k in row.keys() if "年月" in str(k) or "Period" in str(k)), "N/A")
+                                    period_val = str(row.get(period_k, ""))
+                                    rev_k = next((k for k in row.keys() if "當月營收" in str(k) or "Revenue" in str(k)), None)
+                                    rev_val = float(str(row.get(rev_k, "0")).replace(',', '')) if rev_k else 0.0
+                                    
+                                    revenue_dict[code] = {
+                                        "period": period_val,
+                                        "revenue": rev_val,
+                                        "yoy": yoy_val,
+                                        "mom": mom_val
+                                    }
+                                except:
+                                    continue
+                            break # 成功抓到一組 JSON 即可跳出
+            except Exception:
+                pass
+                
+    # 策略 2: 如果 JSON 被雲端主機屏蔽，自動退回到穩定的 mops 原始 CSV 機制
+    if not revenue_dict:
+        urls_csv = [
+            "https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv",
+            "https://mopsfin.twse.com.tw/opendata/t187ap05_O.csv"
+        ]
+        for url in urls_csv:
+            for s in [std_requests, unsafe_session]:
+                try:
+                    res = s.get(url, headers=headers, timeout=8, verify=False)
+                    if res.status_code == 200:
+                        csv_text = res.content.decode('utf-8-sig', errors='ignore')
+                        df = pd.read_csv(StringIO(csv_text))
+                        df.columns = [c.strip() for c in df.columns]
+                        
+                        col_code = next((c for c in df.columns if "公司代號" in c or "stock" in c.lower()), None)
+                        col_yoy = next((c for c in df.columns if "去年同月增減" in c or "yoy" in c.lower()), None)
+                        col_mom = next((c for c in df.columns if "上月比較增減" in c or "mom" in c.lower()), None)
+                        col_period = next((c for c in df.columns if "資料年月" in c or "period" in c.lower()), None)
+                        col_rev = next((c for c in df.columns if "當月營收" in c or "revenue" in c.lower()), None)
+                        
+                        if col_code and col_yoy and col_mom:
+                            for _, row in df.iterrows():
+                                code = str(row[col_code]).strip()
+                                if not code or code == "nan":
+                                    continue
+                                try:
+                                    yoy_val = float(str(row[col_yoy]).replace(',', '').strip())
+                                    mom_val = float(str(row[col_mom]).replace(',', '').strip())
+                                    period_val = str(row[col_period]).strip() if col_period else ""
+                                    rev_val = float(str(row[col_rev]).replace(',', '')) if col_rev else 0.0
+                                    
+                                    revenue_dict[code] = {
+                                        "period": period_val,
+                                        "revenue": rev_val,
+                                        "yoy": yoy_val,
+                                        "mom": mom_val
+                                    }
+                                except:
+                                    continue
+                            break
+                except Exception:
+                    pass
+                    
     return revenue_dict
 
 # ==================== 毫秒級個股/ETF 中文名稱搜尋 ====================
@@ -778,64 +811,97 @@ def fetch_broker_net_buys(broker_id, days):
         pass
     return broker_dict
 
-# ==================== 全市場上市櫃股票實收資本額 (股本) 抓取 ====================
+# ==================== 全市場上市櫃股票實收資本額 (股本) 抓取 (自癒雙模版) ====================
 @st.cache_data(ttl=14400) # 快取 4 小時防止重複請求
 def fetch_stock_capitals():
     """
-    對接證交所與櫃買中心基本資料 API，動態解析並回傳全台股實收資本額 (單位: 億元)
+    對接證交所與櫃買中心基本資料，優先採用 JSON OpenAPI，若連線遭屏蔽則自動回退至穩定 MOPS (CSV)
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     capital_dict = {}
     
-    # 宣告上市、上櫃基本資料端點
-    urls = [
+    # 策略 1: 嘗試 JSON OpenAPI 網域
+    urls_json = [
         ("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", True),    # 上市
         ("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", False) # 上櫃
     ]
     
-    for url, is_listed in urls:
-        try:
-            res = unsafe_session.get(url, headers=headers, timeout=10, verify=False)
-            if res.status_code == 200:
-                data = res.json()
-                if not data or not isinstance(data, list):
-                    continue
+    for url, is_listed in urls_json:
+        # 雙層 Session 連線防阻擋
+        for s in [std_requests, unsafe_session]:
+            try:
+                res = s.get(url, headers=headers, timeout=8, verify=False)
+                if res.status_code == 200:
+                    data = res.json()
+                    if data and isinstance(data, list):
+                        # 自動對齊中文與英文鍵名
+                        first_row = data[0]
+                        code_k = None
+                        cap_k = None
+                        
+                        for k in first_row.keys():
+                            k_str = str(k).strip()
+                            if is_listed:
+                                if k_str == "公司代號": code_k = k
+                                elif k_str == "實收資本額": cap_k = k
+                            else:
+                                if k_str == "SecuritiesCompanyCode": code_k = k
+                                elif k_str in ("PaidInCapital", "實收資本額") or "capital" in k_str.lower(): cap_k = k
+                        
+                        # 模糊比對備用
+                        if not code_k:
+                            code_k = next((k for k in first_row.keys() if "代號" in str(k) or "code" in str(k).lower() or "Securities" in str(k)), None)
+                        if not cap_k:
+                            cap_k = next((k for k in first_row.keys() if "資本" in str(k) or "Capital" in str(k) or "capital" in str(k).lower()), None)
+                        
+                        if code_k and cap_k:
+                            for row in data:
+                                code = str(row.get(code_k, "")).strip()
+                                if not code or code == "nan":
+                                    continue
+                                try:
+                                    cap_str = str(row.get(cap_k, "0")).replace(',', '').strip()
+                                    cap_val = float(cap_str)
+                                    # 將原始金額 (元) 轉換為以「億元」為單位，取至小數點後兩位
+                                    capital_dict[code] = round(cap_val / 100000000.0, 2)
+                                except (ValueError, TypeError):
+                                    continue
+                            break # 成功即跳出
+            except Exception:
+                pass
                 
-                # 自動對齊中文與英文鍵名
-                first_row = data[0]
-                code_k = None
-                cap_k = None
-                
-                for k in first_row.keys():
-                    k_str = str(k).strip()
-                    if is_listed:
-                        if k_str == "公司代號": code_k = k
-                        elif k_str == "實收資本額": cap_k = k
-                    else:
-                        if k_str == "SecuritiesCompanyCode": code_k = k
-                        elif k_str in ("PaidInCapital", "實收資本額") or "capital" in k_str.lower(): cap_k = k
-                
-                # 模糊比對備用
-                if not code_k:
-                    code_k = next((k for k in first_row.keys() if "代號" in str(k) or "code" in str(k).lower() or "Securities" in str(k)), None)
-                if not cap_k:
-                    cap_k = next((k for k in first_row.keys() if "資本" in str(k) or "Capital" in str(k) or "capital" in str(k).lower()), None)
-                
-                if code_k and cap_k:
-                    for row in data:
-                        code = str(row.get(code_k, "")).strip()
-                        if not code or code == "nan":
-                            continue
-                        try:
-                            cap_str = str(row.get(cap_k, "0")).replace(',', '').strip()
-                            cap_val = float(cap_str)
-                            # 將原始金額 (元) 轉換為以「億元」為單位，取至小數點後兩位
-                            capital_dict[code] = round(cap_val / 100000000.0, 2)
-                        except (ValueError, TypeError):
-                            continue
-        except Exception:
-            pass
+    # 策略 2: 若 JSON 端點遭雲端主機（Streamlit Cloud）TLS/憑證阻擋，自動回退至 CSV 備用伺服器
+    if not capital_dict:
+        urls_csv = [
+            ("https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv", True),   # 上市 CSV
+            ("https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv", False)  # 上櫃 CSV
+        ]
+        for url, is_listed in urls_csv:
+            for s in [std_requests, unsafe_session]:
+                try:
+                    res = s.get(url, headers=headers, timeout=8, verify=False)
+                    if res.status_code == 200:
+                        csv_text = res.content.decode('utf-8-sig', errors='ignore')
+                        df = pd.read_csv(StringIO(csv_text))
+                        df.columns = [c.strip() for c in df.columns]
+                        
+                        code_col = "公司代號" if is_listed else "公司代號" # MOPS CSV 通常均為中文
+                        cap_col = "實收資本額"
+                        
+                        if code_col in df.columns and cap_col in df.columns:
+                            for _, row in df.iterrows():
+                                code = str(row[code_col]).strip()
+                                if not code or code == "nan":
+                                    continue
+                                try:
+                                    cap_val = float(str(row[cap_col]).replace(',', '').strip())
+                                    capital_dict[code] = round(cap_val / 100000000.0, 2)
+                                except:
+                                    continue
+                            break
+                except Exception:
+                    pass
             
     return capital_dict
