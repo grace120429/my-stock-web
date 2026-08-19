@@ -41,7 +41,7 @@ def render_tab2(brokers_dict):
         with col_rem:
             st.markdown("**🗑️ 批次勾選移除自選股**")
             if watchlist:
-                with st.expander("👉 展開自選股勾選清單 (可多選一鍵刪除)", expanded=False):
+                with st.expander("展開自選股勾選清單 (可多選一鍵刪除)", expanded=False):
                     cols = st.columns(4)
                     to_remove = []
                     
