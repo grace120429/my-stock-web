@@ -710,12 +710,9 @@ with tab1:
                             latest_vol = latest['Volume']
                             prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
                             vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
-                            if filter_vol and vol_ratio < 2.0:
-                                continue
-                                
-                            is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
-                            ma_status = "均線向上" if is_bullish else "整理/向下"
-                            if filter_ma Glen not in [False] and not is_bullish:
+                            
+                            # 💡 修正打字字元錯誤 [1]
+                            if filter_ma and not is_bullish:
                                 continue
                                 
                             vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
