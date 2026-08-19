@@ -5,6 +5,7 @@ import yfinance as yf
 import time
 import data_fetcher
 import helpers
+import storage
 import utils
 
 def render_tab1(brokers_dict):
@@ -69,7 +70,6 @@ def render_tab1(brokers_dict):
                 st.error("無法自證交所取得資料。")
                 st.session_state.tab1_results = None
             else:
-                # 💡 基礎縮排一律維持 16 個空格，與主進入點 app.py 完全對齊
                 raw_data = pd.concat(dfs, ignore_index=True)
                 
                 tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
@@ -78,7 +78,6 @@ def render_tab1(brokers_dict):
                 else:
                     tdcc_ratios, tdcc_changes = {}, {}
                 
-                # 💡 背景獲取融資數據（自動往前回溯的自癒機制）
                 margin_data = {}
                 margin_date_used = ""
                 st.session_state.margin_is_fallback = False
@@ -102,12 +101,10 @@ def render_tab1(brokers_dict):
                 
                 revenue_data = data_fetcher.fetch_monthly_revenue()
                 
-                # 💡 獲取全市場最新股本數據
                 capital_data = data_fetcher.fetch_stock_capitals()
                 
                 multi_broker_data = {}
                 if b_active and selected_broker_names:
-                    # 💡 升級：對齊天數參數 [2]
                     days_param = 5 if days_count <= 7 else (15 if days_count == 15 else 20)
                     for b_name in selected_broker_names:
                         broker_id = brokers_dict.get(b_name)
@@ -288,7 +285,6 @@ def render_tab1(brokers_dict):
                                         a_stmt = stock.financials
                                     q_eps_series = utils.get_eps_from_stmt(q_stmt)
                                     a_eps_series = utils.get_eps_from_stmt(a_stmt)
-                                    # 💡 修正 Python and 語法 [1]
                                     if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
@@ -357,7 +353,6 @@ def render_tab1(brokers_dict):
                             prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
                             vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
                             
-                            # 💡 修正 Python and 語法，清除打字殘留 [1]
                             if filter_ma and not is_bullish:
                                 continue
                                 
@@ -441,7 +436,7 @@ def render_tab1(brokers_dict):
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
-                    # 💡 自動 API 連線故障診斷
+                    # 💡 自動 API 連線故障診斷 [1]
                     if yf_fail_count > 0:
                         st.warning("⚠️ 偵測到 Yahoo Finance 數據伺服器目前對雲端伺服器進行了臨時頻率限制 (Error 429 - 請求過於頻繁)，導致所有候選股歷史 K 線下載失敗。建議您直接再次點擊上方「開始一鍵篩選股票」按鈕重試，或稍等 1-2 分鐘再試。")
                     else:
@@ -538,7 +533,7 @@ def render_tab1(brokers_dict):
                     for code in selected_codes:
                         if code not in current_watchlist:
                             current_watchlist.append(code)
-                              added_count += 1
+                            added_count += 1
                     if added_count > 0:
                         utils.save_local_watchlist(current_watchlist)
                         st.success(f"已成功加入 {added_count} 檔股票至您的專屬自選股！")
