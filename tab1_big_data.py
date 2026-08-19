@@ -7,7 +7,7 @@ import data_fetcher
 import helpers
 import storage
 
-# 💡 安全重定向引進 [1]
+# 💡 安全重定向引進
 import app_utils as utils
 
 def render_tab1(brokers_dict):
@@ -271,7 +271,7 @@ def render_tab1(brokers_dict):
                             try:
                                 time.sleep(0.15)
                                 
-                                # 💡 修正後：雙後綴自癒機制，優先嘗試 .TW，失敗自動進入 except 並嘗試 .TWO [1]
+                                # 💡 雙後綴自癒機制：優先嘗試 .TW，失敗時自動進入 except 並嘗試 .TWO [1]
                                 try:
                                     if ticker in st.session_state.yf_cache:
                                         hist = st.session_state.yf_cache[ticker]
@@ -279,7 +279,7 @@ def render_tab1(brokers_dict):
                                         hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
                                         if not hist.empty and len(hist) >= 20:
                                             st.session_state.yf_cache[ticker] = hist
-                                except Exception:
+                                except Exception: # 👈 這裡上一版被寫成了錯誤的 try:
                                     ticker = f"{code}.TWO"
                                     if ticker in st.session_state.yf_cache:
                                         hist = st.session_state.yf_cache[ticker]
