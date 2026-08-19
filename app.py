@@ -2,15 +2,18 @@
 import streamlit as st
 import storage
 import data_fetcher
-import utils
 
+# 💡 安全優化：將 utils 重定向引入 app_utils，徹底解決 Streamlit 伺服器套件名稱衝突 [1]
+import app_utils as utils
+
+# 💡 載入模組化後的分頁渲染元件 [1]
 import tab1_big_data
 import tab2_watchlist
 import tab3_brokers
 import tab4_etfs
 import tab5_comments
 
-# 1. 網頁基本設定
+# 1. 頁面基本設定
 st.set_page_config(layout="wide", page_title="台股三大法人飆股選股工具")
 
 # 2. 隱藏 Streamlit 的主選單與 Made with Streamlit 頁尾
