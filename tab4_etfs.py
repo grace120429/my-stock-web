@@ -4,7 +4,9 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 import data_fetcher
 import storage
-import utils
+
+# 💡 安全重定向引進 [1]
+import app_utils as utils
 
 def render_tab4():
     now_tw = datetime.now(timezone(timedelta(hours=8)))
@@ -198,7 +200,6 @@ def render_tab4():
                 except:
                     pass
                     
-                # 💡 修正 Python and 語法 [1]
                 if ex_month == st.session_state.cal_month and ex_year == st.session_state.cal_year:
                     total_selected_month_dividend += total_gu * latest_div_value
                 
