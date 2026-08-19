@@ -12,6 +12,115 @@ import streamlit as st
 from config import unsafe_session
 import helpers
 
+# ==================== 官方雙月歷史日行情直連備用機制 ====================
+def fetch_historical_data_official_fallback(code, is_listed=True):
+    """
+    當 Yahoo Finance 徹底被 429 阻擋封鎖時，此處啟動「官方雙月歷史日行情直連自癒機制」。
+    向台灣證交所與櫃買中心官方 JSON API 查詢「本月」與「前一個月」的個股日成交行情，
+    並拼接成 K 線 DataFrame！這是不限海外 IP、100% 穩定的官方直連方案。 [1]
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    now_tw = datetime.now(timezone(timedelta(hours=8)))
+    # 取得本月與上個月的首日 YYYYMM01 字串
+    current_month_str = now_tw.strftime("%Y%m01")
+    last_month_date = now_tw - timedelta(days=28)
+    last_month_str = last_month_date.strftime("%Y%m01")
+    
+    closes, opens, highs, lows, volumes, dates = [], [], [], [], [], []
+    
+    # 進行本月與上月的雙月抓取
+    for month_query in [last_month_str, current_month_str]:
+        if is_listed:
+            # 1. 上市股票直連證交所官方 STOCK_DAY API
+            url = f"https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date={month_query}&stockNo={code}"
+            try:
+                res = unsafe_session.get(url, headers=headers, timeout=6, verify=False)
+                if res.status_code == 200:
+                    json_data = res.json()
+                    data = json_data.get("data", [])
+                    if data:
+                        for row in data:
+                            if len(row) >= 7:
+                                # 民國日期 "115/08/03" -> 轉換為 Datetime
+                                date_raw = str(row[0]).strip()
+                                parsed_dt = helpers.parse_taiwan_date(date_raw)
+                                if parsed_dt:
+                                    try:
+                                        p_open = float(row[3].replace(',', '').strip())
+                                        p_high = float(row[4].replace(',', '').strip())
+                                        p_low = float(row[5].replace(',', '').strip())
+                                        p_close = float(row[6].replace(',', '').strip())
+                                        p_vol = float(row[1].replace(',', '').strip())  # 成交股數
+                                        
+                                        dates.append(datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, tzinfo=timezone(timedelta(hours=8))))
+                                        opens.append(p_open)
+                                        highs.append(p_high)
+                                        lows.append(p_low)
+                                        closes.append(p_close)
+                                        volumes.append(p_vol)
+                                    except:
+                                        continue
+            except:
+                pass
+        else:
+            # 2. 上櫃股票直連櫃買中心官方 daily_trading_info API
+            # 民國月份格式 例如 "115/08"
+            try:
+                yr = int(month_query[:4]) - 1911
+                mo = month_query[4:6]
+                roc_month = f"{yr}/{mo}"
+            except:
+                continue
+                
+            url = f"https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/daily_trading_info_result.php?l=zh-tw&o=json&d={roc_month}&s={code}"
+            try:
+                res = unsafe_session.get(url, headers=headers, timeout=6, verify=False)
+                if res.status_code == 200:
+                    json_data = res.json()
+                    data = json_data.get("aaData", [])
+                    if data:
+                        for row in data:
+                            if len(row) >= 7:
+                                date_raw = str(row[0]).strip()
+                                parsed_dt = helpers.parse_taiwan_date(date_raw)
+                                if parsed_dt:
+                                    try:
+                                        p_open = float(row[3].replace(',', '').strip())
+                                        p_high = float(row[4].replace(',', '').strip())
+                                        p_low = float(row[5].replace(',', '').strip())
+                                        p_close = float(row[6].replace(',', '').strip())
+                                        p_vol = float(row[1].replace(',', '').strip())  # 成交股數
+                                        
+                                        dates.append(datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, tzinfo=timezone(timedelta(hours=8))))
+                                        opens.append(p_open)
+                                        highs.append(p_high)
+                                        lows.append(p_low)
+                                        closes.append(p_close)
+                                        volumes.append(p_vol)
+                                    except:
+                                        continue
+            except:
+                pass
+                
+    # 組合 DataFrame
+    if dates and closes:
+        df = pd.DataFrame({
+            "Open": opens,
+            "High": highs,
+            "Low": lows,
+            "Close": closes,
+            "Volume": volumes,
+            "Dividends": [0.0] * len(dates),
+            "Stock Splits": [0.0] * len(dates)
+        }, index=dates)
+        # 去除重複日期索引並由舊到新排序
+        df = df[~df.index.duplicated(keep='first')].sort_index()
+        return df
+    return pd.DataFrame()
+
 # ==================== 原生 API 直連繞過機制 (429 Bypass) ====================
 def fetch_historical_data_direct_fallback(ticker, range_str="6mo"):
     """
@@ -92,6 +201,10 @@ def fetch_historical_data_direct_fallback(ticker, range_str="6mo"):
 # ==================== 歷史資料全域安全快取 ====================
 @st.cache_data(ttl=14400)
 def fetch_historical_data_cached(ticker, period="6mo"):
+    # 提取代碼與判斷上市櫃
+    code = ticker.split('.')[0]
+    is_listed = ".TW" in ticker.upper()
+
     # 1. 優先嘗試標準 yfinance 抓取
     try:
         stock = yf.Ticker(ticker, session=unsafe_session)
@@ -101,13 +214,18 @@ def fetch_historical_data_cached(ticker, period="6mo"):
     except Exception:
         pass
         
-    # 2. 若被 429 阻擋或出錯，立即自動啟用「原生 JSON 直接連線自癒機制」繞過封鎖 [1]
+    # 2. 若被 429 阻擋，自動啟用「原生 JSON 直接連線自癒機制」繞過封鎖 [1]
     hist_fallback = fetch_historical_data_direct_fallback(ticker, range_str=period)
     if hist_fallback is not None and not hist_fallback.empty:
         return hist_fallback
         
-    # 兩者皆墨才拋出錯誤，確保 Streamlit 不快取失敗空值 [1]
-    raise RuntimeError(f"Yahoo Finance standard and fallback direct API both failed for {ticker}")
+    # 3. 💡 終極自癒防護：若前兩者皆被 Yahoo 阻擋（雲端 IP 被完全封鎖），自動直連台灣官方「證交所/櫃買中心」 [1]
+    hist_official = fetch_historical_data_official_fallback(code, is_listed=is_listed)
+    if hist_official is not None and not hist_official.empty:
+        return hist_official
+        
+    # 三者皆墨才拋出錯誤，確保 Streamlit 不快取失敗空值 [1]
+    raise RuntimeError(f"All 3 K-line sources (Yahoo, Direct, and TWSE Official) failed for {ticker}")
 
 # ==================== 上市法人買賣超資料抓取 (TWSE) ====================
 def fetch_twse_t86(date_str):
@@ -286,7 +404,7 @@ def fetch_monthly_revenue():
                                 code_k = k
                             elif any(term in k_str for term in ["去年同月增減", "去年同月比", "YoY", "yoy", "去年同期", "LastYearCompare"]):
                                 yoy_k = k
-                            elif any(term in k_str for term in ["上文比較增減", "上月增減", "MoM", "mom", "上月比", "PrevMonthCompare"]):
+                            elif any(term in k_str for term in ["上月比較增減", "上月增減", "MoM", "mom", "上月比", "PrevMonthCompare"]):
                                 mom_k = k
                         
                         if not code_k:
