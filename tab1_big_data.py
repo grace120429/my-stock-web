@@ -102,8 +102,10 @@ def render_tab1(brokers_dict):
                 st.session_state.margin_date_used = margin_date_used
                 
                 revenue_data = data_fetcher.fetch_monthly_revenue()
-                
                 capital_data = data_fetcher.fetch_stock_capitals()
+                
+                # 💡 一鍵拉取全市場最新收盤現價與漲跌幅快照 (僅需 2 個 HTTP 請求)
+                all_snapshot_prices = data_fetcher.fetch_all_daily_prices()
                 
                 multi_broker_data = {}
                 if b_active and selected_broker_names:
@@ -129,6 +131,7 @@ def render_tab1(brokers_dict):
                     return True, total_diff
 
                 combined = raw_data.copy()
+                combined['證券代號'] = combined['證券代號'].astype(str).str.strip()  # 💡 乾淨清洗代號空格
                 combined = combined[combined['證券代號'].str.match(r'^[a-zA-Z0-9]{4,6}$')]
                 
                 col_foreign, col_trust, col_dealer = None, None, None
@@ -221,6 +224,9 @@ def render_tab1(brokers_dict):
                     yf_session = utils.create_yf_session()
                     yf_fail_count = 0  # 💡 追蹤連線失效次數
                     
+                    # 💡 決定是否需要載入 K 線歷史資料 (若沒勾選任何需要技術分析的指標，則完全略過下載，100% 免疫 429!)
+                    need_history = filter_ma or filter_macd or filter_vol or filter_box or filter_momentum
+                    
                     for _, row_item in top_candidates.iterrows():
                         code = row_item['證券代號']
                         name = row_item['證券名稱']
@@ -234,7 +240,7 @@ def render_tab1(brokers_dict):
                             continue
                         elif cap_filter_opt == "微型股 (股本 < 10億)" and stock_cap >= 10.0:
                             continue
-                        elif cap_filter_opt == "中大型股 (股本 >= 50億)" and stock_cap < 50.0:
+                        elif cap_filter_opt == "心中大型股 (股本 >= 50億)" and stock_cap < 50.0:
                             continue
                             
                         rev_item = revenue_data.get(code)
@@ -249,187 +255,184 @@ def render_tab1(brokers_dict):
                         latest_q_eps_val = "ETF無EPS" if is_code_etf else "載入中..."
                         latest_a_eps_val = "ETF無EPS" if is_code_etf else "載入中..."
                         
-                        try:
-                            time.sleep(0.15)
-                            
-                            # 💡 雙後綴自癒機制
+                        # 💡 初始化行情數據（優先直接採用全市場極速快照數據）
+                        snapshot_item = all_snapshot_prices.get(code, {})
+                        price = snapshot_item.get("price", 0.0)
+                        pct_change = snapshot_item.get("pct_change", 0.0)
+                        
+                        ma_status_display = "整理/向下"
+                        macd_daily_status = "N/A"
+                        macd_60m_status = "N/A"
+                        sr_1m, sr_6m = "N/A / N/A", "N/A / N/A"
+                        box_amp = 0.0
+                        is_box = False
+                        
+                        if need_history:
                             try:
-                                if ticker in st.session_state.yf_cache:
-                                    hist = st.session_state.yf_cache[ticker]
-                                else:
-                                    hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
-                                    if not hist.empty and len(hist) >= 20:
-                                        st.session_state.yf_cache[ticker] = hist
-                            except Exception:
-                                ticker = f"{code}.TWO"
-                                if ticker in st.session_state.yf_cache:
-                                    hist = st.session_state.yf_cache[ticker]
-                                else:
-                                    hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
-                                    if not hist.empty and len(hist) >= 20:
-                                        st.session_state.yf_cache[ticker] = hist
-                                        
-                            if hist.empty or len(hist) < 20:
-                                continue
-                            
-                            is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
-                            if filter_box and not is_box:
-                                continue
+                                time.sleep(0.15)
                                 
-                            if not is_code_etf:
+                                # 雙後綴自癒機制
                                 try:
-                                    stock = yf.Ticker(ticker, session=yf_session)
-                                    try:
-                                        q_stmt = stock.quarterly_income_stmt
-                                        a_stmt = stock.income_stmt
-                                    except:
-                                        q_stmt = stock.quarterly_financials
-                                        a_stmt = stock.financials
-                                    q_eps_series = utils.get_eps_from_stmt(q_stmt)
-                                    a_eps_series = utils.get_eps_from_stmt(a_stmt)
-                                    if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
-                                        latest_q_eps = q_eps_series.iloc[0]
-                                        q_date = q_eps_series.index[0]
-                                        q_str = utils.get_quarter_str(q_date)
-                                        
-                                        target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
-                                        a_eps_val = None
-                                        a_eps_year = None
-                                        for idx_date, val in a_eps_series.items():
-                                            try:
-                                                dt = pd.to_datetime(idx_date)
-                                                if dt.year == target_year:
-                                                    a_eps_val = val
-                                                    a_eps_year = target_year
-                                                    break
-                                            except:
-                                                pass
-                                        if a_eps_val is None:
-                                            try:
-                                                first_date = a_eps_series.index[0]
-                                                dt = pd.to_datetime(first_date)
-                                                a_eps_val = a_eps_series.iloc[0]
-                                                a_eps_year = dt.year
-                                            except:
-                                                pass
-                                        
-                                        if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
-                                            latest_q_eps_val = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
-                                            latest_a_eps_val = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
-                                            
-                                            latest_a_eps = a_eps_series.iloc[0]
-                                            if eps_surge_active and latest_q_eps <= latest_a_eps:
-                                                continue
-                                        else:
-                                            if eps_surge_active:
-                                                continue
+                                    if ticker in st.session_state.yf_cache:
+                                        hist = st.session_state.yf_cache[ticker]
                                     else:
-                                        if eps_surge_active:
-                                            continue
+                                        hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                                        if not hist.empty and len(hist) >= 20:
+                                            st.session_state.yf_cache[ticker] = hist
                                 except Exception:
-                                    pass
+                                    ticker = f"{code}.TWO"
+                                    if ticker in st.session_state.yf_cache:
+                                        hist = st.session_state.yf_cache[ticker]
+                                    else:
+                                        hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                                        if not hist.empty and len(hist) >= 20:
+                                            st.session_state.yf_cache[ticker] = hist
+                                            
+                                if hist.empty or len(hist) < 20:
+                                    continue
                                 
-                            hist['MA5'] = hist['Close'].rolling(5).mean()
-                            hist['MA20'] = hist['Close'].rolling(20).mean()
-                            latest = hist.iloc[-1]
-                            
-                            price = latest['Close']
-                            pct_change_5d = 0.0
-                            if len(hist) >= 6:
-                                price_5d_ago = hist['Close'].iloc[-6]
-                                if price_5d_ago > 0:
-                                    pct_change_5d = ((price - price_5d_ago) / price_5d_ago) * 100
-                            
-                            is_momentum_stock = (pct_change_5d > 10.0) and (price > latest['MA5']) and (latest['MA5'] > latest['MA20'])
-                            
-                            if filter_momentum and not is_momentum_stock:
-                                continue
+                                # 更新最新真實日行情
+                                price = hist['Close'].iloc[-1]
+                                prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
+                                pct_change = ((price - prev_price) / prev_price) * 100
                                 
-                            if pd.isna(price) or price <= 0:
-                                continue
-                    
-                            ma5 = latest['MA5']
-                            ma20 = latest['MA20']
-                            
-                            latest_vol = latest['Volume']
-                            prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
-                            vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
-                            
-                            if filter_ma and not is_bullish:
-                                continue
+                                is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
+                                if filter_box and not is_box:
+                                    continue
+                                    
+                                hist['MA5'] = hist['Close'].rolling(5).mean()
+                                hist['MA20'] = hist['Close'].rolling(20).mean()
+                                latest = hist.iloc[-1]
                                 
-                            vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
-                            ma_status_display = f"{ma_status} ({vol_status_str})"
-                            
-                            latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
-                            raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
-                            
-                            if latest_osc_daily is not None and latest_osc_daily <= 0:
-                                macd_daily_status = f"🟢 {raw_macd_daily}"
-                            else:
-                                macd_daily_status = f"🔴 {raw_macd_daily}"
-                            
-                            if filter_macd and "MACD金叉" not in macd_daily_status and "多頭" not in macd_daily_status:
-                                continue
+                                pct_change_5d = 0.0
+                                if len(hist) >= 6:
+                                    price_5d_ago = hist['Close'].iloc[-6]
+                                    if price_5d_ago > 0:
+                                        pct_change_5d = ((price - price_5d_ago) / price_5d_ago) * 100
                                 
+                                is_momentum_stock = (pct_change_5d > 10.0) and (price > latest['MA5']) and (latest['MA5'] > latest['MA20'])
+                                if filter_momentum and not is_momentum_stock:
+                                    continue
+                                    
+                                if pd.isna(price) or price <= 0:
+                                    continue
+                        
+                                ma5 = latest['MA5']
+                                ma20 = latest['MA20']
+                                
+                                latest_vol = latest['Volume']
+                                prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
+                                vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
+                                if filter_vol and vol_ratio < 2.0:
+                                    continue
+                                    
+                                is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
+                                ma_status = "均線向上" if is_bullish else "整理/向下"
+                                if filter_ma and not is_bullish:
+                                    continue
+                                    
+                                vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
+                                ma_status_display = f"{ma_status} ({vol_status_str})"
+                                
+                                latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
+                                raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
+                                
+                                if latest_osc_daily is not None and latest_osc_daily <= 0:
+                                    macd_daily_status = f"🟢 {raw_macd_daily}"
+                                else:
+                                    macd_daily_status = f"🔴 {raw_macd_daily}"
+                                
+                                if filter_macd and "MACD金叉" not in macd_daily_status and "多頭" not in macd_daily_status:
+                                    continue
+                                    
+                                try:
+                                    if ticker in st.session_state.yf_60m_cache:
+                                        hist_60m = st.session_state.yf_60m_cache[ticker]
+                                    else:
+                                        stock_60m = yf.Ticker(ticker, session=yf_session)
+                                        hist_60m = stock_60m.history(interval="60m", period="1mo")
+                                        if not hist_60m.empty:
+                                            st.session_state.yf_60m_cache[ticker] = hist_60m
+                                    latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
+                                    raw_macd_60m = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                                    
+                                    if latest_osc_60m is not None and latest_osc_60m <= 0:
+                                        macd_60m_status = f"🟢 {raw_macd_60m}"
+                                    else:
+                                        macd_60m_status = f"🔴 {raw_macd_60m}"
+                                except:
+                                    macd_60m_status = "N/A"
+                                    
+                                sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
+                            except Exception:
+                                yf_fail_count += 1
+                                continue
+                        else:
+                            # 💡 如果不需要載入 K 線，且從快照抓到的股票無效（未開盤/無資料），則略過
+                            if price <= 0:
+                                continue
+
+                        if not is_code_etf and not need_history:
                             try:
-                                if ticker in st.session_state.yf_60m_cache:
-                                    hist_60m = st.session_state.yf_60m_cache[ticker]
-                                else:
-                                    stock_60m = yf.Ticker(ticker, session=yf_session)
-                                    hist_60m = stock_60m.history(interval="60m", period="1mo")
-                                    if not hist_60m.empty:
-                                        st.session_state.yf_60m_cache[ticker] = hist_60m
-                                latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
-                                raw_macd_60m = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                                stock = yf.Ticker(ticker, session=yf_session)
+                                q_stmt = stock.quarterly_income_stmt
+                                a_stmt = stock.income_stmt
+                                q_eps_series = utils.get_eps_from_stmt(q_stmt)
+                                a_eps_series = utils.get_eps_from_stmt(a_stmt)
+                                if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
+                                    latest_q_eps = q_eps_series.iloc[0]
+                                    q_date = q_eps_series.index[0]
+                                    q_str = utils.get_quarter_str(q_date)
+                                    
+                                    target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
+                                    a_eps_val = None
+                                    for idx_date, val in a_eps_series.items():
+                                        dt = pd.to_datetime(idx_date)
+                                        if dt.year == target_year:
+                                            a_eps_val = val
+                                            break
+                                    if pd.notna(latest_q_eps) and a_eps_val is not None:
+                                        latest_q_eps_val = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
+                                        latest_a_eps_val = f"({target_year}年) {round(a_eps_val, 2)} 元"
+                            except Exception:
+                                pass
                                 
-                                if latest_osc_60m is not None and latest_osc_60m <= 0:
-                                    macd_60m_status = f"🟢 {raw_macd_60m}"
-                                else:
-                                    macd_60m_status = f"🔴 {raw_macd_60m}"
-                            except:
-                                macd_60m_status = "N/A"
-                                
-                            sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
-                            prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
-                            pct_change = ((price - prev_price) / prev_price) * 100
-                            
-                            broker_details_list = []
-                            if b_active and selected_broker_names:
-                                for b_name in selected_broker_names:
-                                    b_data = multi_broker_data.get(b_name, {})
-                                    if code in b_data:
-                                        net_buy_wan = b_data[code]["diff"]
-                                        est_shares = int(round((net_buy_wan * 10) / price)) if price > 0 else 0
-                                        short_b_name = b_name.split(" ")[0]
-                                        broker_details_list.append(f"{short_b_name}: {est_shares}張 ({net_buy_wan}萬)")
-                            
-                            broker_details_str = " | ".join(broker_details_list) if broker_details_list else "無"
-                            
-                            final_rows.append({
-                                "代號": code,
-                                "股票名稱": name,
-                                "收盤價": round(price, 1),
-                                "股本(億)": stock_cap if stock_cap > 0 else None,  # 💡 整合股本欄位
-                                "漲跌幅(%)": round(pct_change, 2),
-                                "最新單季EPS": latest_q_eps_val,
-                                "去年年度EPS": latest_a_eps_val,
-                                "月營收YoY/MoM": helpers.format_rev_growth(rev_item),
-                                "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
-                                "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
-                                "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
-                                "分點買超明細": broker_details_str,
-                                "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),
-                                "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
-                                "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
-                                "均線狀態": ma_status_display,
-                                "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",
-                                "日K_MACD": macd_daily_status,
-                                "60m_MACD": macd_60m_status,
-                                "短期支壓(1M)": sr_1m,
-                                "中期支壓(6M)": sr_6m,
-                                "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
-                              })
+                        broker_details_list = []
+                        if b_active and selected_broker_names:
+                            for b_name in selected_broker_names:
+                                b_data = multi_broker_data.get(b_name, {})
+                                if code in b_data:
+                                    net_buy_wan = b_data[code]["diff"]
+                                    est_shares = int(round((net_buy_wan * 10) / price)) if price > 0 else 0
+                                    short_b_name = b_name.split(" ")[0]
+                                    broker_details_list.append(f"{short_b_name}: {est_shares}張 ({net_buy_wan}萬)")
+                        
+                        broker_details_str = " | ".join(broker_details_list) if broker_details_list else "無"
+                        
+                        final_rows.append({
+                            "代號": code,
+                            "股票名稱": name,
+                            "收盤價": round(price, 1),
+                            "股本(億)": stock_cap if stock_cap > 0 else None,
+                            "漲跌幅(%)": round(pct_change, 2),
+                            "最新單季EPS": latest_q_eps_val,
+                            "去年年度EPS": latest_a_eps_val,
+                            "月營收YoY/MoM": helpers.format_rev_growth(rev_item),
+                            "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
+                            "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
+                            "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
+                            "分點買超明細": broker_details_str,
+                            "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),
+                            "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
+                            "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
+                            "均線狀態": ma_status_display,
+                            "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",
+                            "日K_MACD": macd_daily_status,
+                            "60m_MACD": macd_60m_status,
+                            "短期支壓(1M)": sr_1m,
+                            "中期支壓(6M)": sr_6m,
+                            "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
+                          })
                         except Exception:
                             yf_fail_count += 1
                             continue
@@ -438,7 +441,7 @@ def render_tab1(brokers_dict):
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
-                    # 💡 自動 API 連線故障診斷：只有當大比例（>70%）的股票都下載失敗時，才判定是 Yahoo API 阻擋 [1]
+                    # 💡 優化：只有當大比例（>70%）的股票都因 API 限制而下載失敗時，才判定是 Yahoo API 阻擋 [1]
                     if yf_fail_count > len(top_candidates) * 0.7:
                         st.warning("⚠️ 偵測到 Yahoo Finance 數據伺服器目前對雲端伺服器進行了臨時頻率限制 (Error 429 - 請求過於頻繁)，導致所有候選股歷史 K 線下載失敗。建議您直接再次點擊上方「開始一鍵篩選股票」按鈕重試，或稍等 1-2 分鐘再試。")
                     else:
