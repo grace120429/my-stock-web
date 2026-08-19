@@ -585,6 +585,7 @@ with tab1:
                     
                     final_rows = []
                     yf_session = create_yf_session()
+                    yf_fail_count = 0  # 💡 新增：追蹤 Yahoo API 連線失敗次數
                     
                     for _, row_item in top_candidates.iterrows():
                         code = row_item['證券代號']
@@ -616,15 +617,24 @@ with tab1:
                         
                         try:
                             time.sleep(0.15)
-                            stock = yf.Ticker(ticker, session=yf_session)
                             
-                            if ticker in st.session_state.yf_cache:
-                                hist = st.session_state.yf_cache[ticker]
-                            else:
-                                hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
-                                if not hist.empty and len(hist) >= 20:
-                                    st.session_state.yf_cache[ticker] = hist
-                            
+                            # 💡 升級：雙後綴自癒機制，優先嘗試 .TW，失敗自動嘗試 .TWO [1]
+                            try:
+                                if ticker in st.session_state.yf_cache:
+                                    hist = st.session_state.yf_cache[ticker]
+                                else:
+                                    hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                                    if not hist.empty and len(hist) >= 20:
+                                        st.session_state.yf_cache[ticker] = hist
+                            except Exception:
+                                ticker = f"{code}.TWO"
+                                if ticker in st.session_state.yf_cache:
+                                    hist = st.session_state.yf_cache[ticker]
+                                else:
+                                    hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                                    if not hist.empty and len(hist) >= 20:
+                                        st.session_state.yf_cache[ticker] = hist
+                                        
                             if hist.empty or len(hist) < 20:
                                 continue
                             
@@ -635,52 +645,56 @@ with tab1:
                                 
                             if not is_code_etf:
                                 try:
-                                    q_stmt = stock.quarterly_income_stmt
-                                    a_stmt = stock.income_stmt
-                                except:
-                                    q_stmt = stock.quarterly_financials
-                                    a_stmt = stock.financials
-                                q_eps_series = get_eps_from_stmt(q_stmt)
-                                a_eps_series = get_eps_from_stmt(a_stmt)
-                                if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
-                                    latest_q_eps = q_eps_series.iloc[0]
-                                    q_date = q_eps_series.index[0]
-                                    q_str = get_quarter_str(q_date)
-                                    
-                                    target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
-                                    a_eps_val = None
-                                    a_eps_year = None
-                                    for idx_date, val in a_eps_series.items():
-                                        try:
-                                            dt = pd.to_datetime(idx_date)
-                                            if dt.year == target_year:
-                                                a_eps_val = val
-                                                a_eps_year = target_year
-                                                break
-                                        except:
-                                            pass
-                                    if a_eps_val is None:
-                                        try:
-                                            first_date = a_eps_series.index[0]
-                                            dt = pd.to_datetime(first_date)
-                                            a_eps_val = a_eps_series.iloc[0]
-                                            a_eps_year = dt.year
-                                        except:
-                                            pass
-                                    
-                                    if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
-                                        latest_q_eps_val = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
-                                        latest_a_eps_val = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
+                                    stock = yf.Ticker(ticker, session=yf_session)
+                                    try:
+                                        q_stmt = stock.quarterly_income_stmt
+                                        a_stmt = stock.income_stmt
+                                    except:
+                                        q_stmt = stock.quarterly_financials
+                                        a_stmt = stock.financials
+                                    q_eps_series = get_eps_from_stmt(q_stmt)
+                                    a_eps_series = get_eps_from_stmt(a_stmt)
+                                    if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
+                                        latest_q_eps = q_eps_series.iloc[0]
+                                        q_date = q_eps_series.index[0]
+                                        q_str = get_quarter_str(q_date)
                                         
-                                        latest_a_eps = a_eps_series.iloc[0]
-                                        if eps_surge_active and latest_q_eps <= latest_a_eps:
-                                            continue
+                                        target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
+                                        a_eps_val = None
+                                        a_eps_year = None
+                                        for idx_date, val in a_eps_series.items():
+                                            try:
+                                                dt = pd.to_datetime(idx_date)
+                                                if dt.year == target_year:
+                                                    a_eps_val = val
+                                                    a_eps_year = target_year
+                                                    break
+                                            except:
+                                                pass
+                                        if a_eps_val is None:
+                                            try:
+                                                first_date = a_eps_series.index[0]
+                                                dt = pd.to_datetime(first_date)
+                                                a_eps_val = a_eps_series.iloc[0]
+                                                a_eps_year = dt.year
+                                            except:
+                                                pass
+                                        
+                                        if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
+                                            latest_q_eps_val = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
+                                            latest_a_eps_val = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
+                                            
+                                            latest_a_eps = a_eps_series.iloc[0]
+                                            if eps_surge_active and latest_q_eps <= latest_a_eps:
+                                                continue
+                                        else:
+                                            if eps_surge_active:
+                                                continue
                                     else:
                                         if eps_surge_active:
                                             continue
-                                else:
-                                    if eps_surge_active:
-                                        continue
+                                except Exception:
+                                    pass
                                 
                             hist['MA5'] = hist['Close'].rolling(5).mean()
                             hist['MA20'] = hist['Close'].rolling(20).mean()
@@ -710,6 +724,11 @@ with tab1:
                             latest_vol = latest['Volume']
                             prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
                             vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
+                            if filter_vol and vol_ratio < 2.0:
+                                continue
+                                
+                            is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
+                            ma_status = "均線向上" if is_bullish else "整理/向下"
                             
                             # 💡 修正打字字元與邏輯錯誤 [1]
                             if filter_ma and not is_bullish:
@@ -789,13 +808,18 @@ with tab1:
                                 "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
                             })
                         except Exception:
+                            yf_fail_count += 1
                             continue
                             
                 if final_rows:
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
-                    st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
+                    # 💡 自動診斷：如果是因為外部 Yahoo 數據庫 429 阻擋，給予使用者最友善的明確警示 [1]
+                    if yf_fail_count > 0:
+                        st.warning("⚠️ 偵測到 Yahoo Finance 數據伺服器目前對雲端伺服器進行了臨時頻率限制 (Error 429 - 請求過於頻繁)，導致所有候選股歷史 K 線下載失敗。建議您直接再次點擊上方「開始一鍵篩選股票」按鈕重試，或稍等 1-2 分鐘再試。")
+                    else:
+                        st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
 
     # 顯示過濾後的數據結果
     if st.session_state.tab1_results is not None:
