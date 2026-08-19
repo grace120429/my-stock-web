@@ -6,7 +6,9 @@ import time
 import data_fetcher
 import helpers
 import storage
-import utils
+
+# 💡 安全重定向引進 [1]
+import app_utils as utils
 
 def render_tab2(brokers_dict):
     watchlist = utils.get_local_watchlist()
@@ -41,7 +43,7 @@ def render_tab2(brokers_dict):
         with col_rem:
             st.markdown("**🗑️ 批次勾選移除自選股**")
             if watchlist:
-                with st.expander("展開自選股勾選清單 (可多選一鍵刪除)", expanded=False):
+                with st.expander("👉 展開自選股勾選清單 (可多選一鍵刪除)", expanded=False):
                     cols = st.columns(4)
                     to_remove = []
                     
