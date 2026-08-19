@@ -711,7 +711,7 @@ with tab1:
                             prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
                             vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
                             
-                            # 💡 修正打字字元錯誤 [1]
+                            # 💡 修正打字字元與邏輯錯誤 [1]
                             if filter_ma and not is_bullish:
                                 continue
                                 
@@ -954,9 +954,12 @@ with tab2:
                             if st.checkbox(label, key=f"del_chk_{code}"):
                                 to_remove.append(code)
                     
-                    if to_remove:
-                        st.write("")
-                        if st.button(f"🗑️ 確認移除已勾選的 {len(to_remove)} 檔股票", type="secondary", use_container_width=True):
+                    # 💡 永遠顯示移除按鈕，防止隱藏造成使用者困惑
+                    st.write("")
+                    if st.button(f"🗑️ 確認移除已勾選的股票 ({len(to_remove)} 檔)", type="secondary", use_container_width=True):
+                        if not to_remove:
+                            st.warning("請先勾選您想要移除的自選股！")
+                        else:
                             updated_watchlist = [c for c in watchlist if c not in to_remove]
                             save_local_watchlist(updated_watchlist)
                             st.success(f"已成功從您的自選清單移除：{', '.join(to_remove)}！")
