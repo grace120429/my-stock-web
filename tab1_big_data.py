@@ -271,16 +271,8 @@ def render_tab1(brokers_dict):
                             try:
                                 time.sleep(0.15)
                                 
-                                # 雙後綴自癒機制
+                                # 雙後綴自癒機制 [1]
                                 try:
-                                    if ticker in st.session_state.yf_cache:
-                                        hist = st.session_state.yf_cache[ticker]
-                                    else:
-                                        hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
-                                        if not hist.empty and len(hist) >= 20:
-                                            st.session_state.yf_cache[ticker] = hist
-                                try:
-                                    ticker = f"{code}.TWO"
                                     if ticker in st.session_state.yf_cache:
                                         hist = st.session_state.yf_cache[ticker]
                                     else:
@@ -288,7 +280,13 @@ def render_tab1(brokers_dict):
                                         if not hist.empty and len(hist) >= 20:
                                             st.session_state.yf_cache[ticker] = hist
                                 except Exception:
-                                    pass
+                                    ticker = f"{code}.TWO"
+                                    if ticker in st.session_state.yf_cache:
+                                        hist = st.session_state.yf_cache[ticker]
+                                    else:
+                                        hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                                        if not hist.empty and len(hist) >= 20:
+                                            st.session_state.yf_cache[ticker] = hist
                                             
                                 if hist.empty or len(hist) < 20:
                                     continue
