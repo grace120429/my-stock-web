@@ -102,6 +102,7 @@ def render_tab1(brokers_dict):
                 st.session_state.margin_date_used = margin_date_used
                 
                 revenue_data = data_fetcher.fetch_monthly_revenue()
+                
                 capital_data = data_fetcher.fetch_stock_capitals()
                 
                 multi_broker_data = {}
@@ -437,11 +438,11 @@ def render_tab1(brokers_dict):
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
-                    # 💡 自動 API 連線故障診斷
-                    if yf_fail_count > 0:
+                    # 💡 自動 API 連線故障診斷：只有當大比例（>70%）的股票都下載失敗時，才判定是 Yahoo API 阻擋 [1]
+                    if yf_fail_count > len(top_candidates) * 0.7:
                         st.warning("⚠️ 偵測到 Yahoo Finance 數據伺服器目前對雲端伺服器進行了臨時頻率限制 (Error 429 - 請求過於頻繁)，導致所有候選股歷史 K 線下載失敗。建議您直接再次點擊上方「開始一鍵篩選股票」按鈕重試，或稍等 1-2 分鐘再試。")
                     else:
-                        st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
+                        st.warning("查無符合篩選條件之個股。")
 
     # 顯示過濾後的數據結果
     if st.session_state.tab1_results is not None:
