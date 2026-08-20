@@ -199,7 +199,7 @@ def create_yf_session():
     return session
 
 # ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V7 完美對齊刷新版) ====================
-# 💡 升級：此處函數定義與主程式排版徹底對齊為第 7 版，直接對應大數據 fetch_all_daily_prices_v3 函數
+# 💡 升級：為徹底刷新 Streamlit 之前編譯失敗記錄的舊快取，此處將快取函數升級至第 7 版
 @st.cache_data(ttl=1800)
 def fetch_stock_rankings_cached_v7(period="day"):
     """
@@ -219,7 +219,7 @@ def fetch_stock_rankings_cached_v7(period="day"):
     # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
     if period == "day":
         try:
-            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v3 當日大數據 API
+            # 🚀 呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v3 當日大數據 API
             prices = data_fetcher.fetch_all_daily_prices_v3()
             if prices:
                 all_stocks = []
@@ -239,7 +239,7 @@ def fetch_stock_rankings_cached_v7(period="day"):
                 for idx, item in enumerate(all_stocks):
                     item["排行"] = idx + 1
                 if len(all_stocks) > 0:
-                    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股（包括鼎元）悉數進榜！
+                    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股悉數進榜！
         except Exception as e_day:
             print(f"Daily OpenAPI calculation failed: {e_day}")
 
@@ -316,182 +316,6 @@ def fetch_stock_rankings_cached_v7(period="day"):
         item["排行"] = idx + 1
         
     return all_stocks[:50]
-
-# ==================== 留言區檔案讀寫輔助函數 ====================
-COMMENTS_FILE = "comments.json"
-
-def load_comments():
-    """載入留言"""
-    if not os.path.exists(COMMENTS_FILE):
-        return []
-    try:
-        with open(COMMENTS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return []
-
-def save_comments(comments):
-    """儲存留言"""
-    try:
-        with open(COMMENTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(comments, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        st.error(f"儲存留言失敗: {e}")
-
-# ==================== 側邊欄公告檔案讀寫輔助函數 ====================
-ANNOUNCEMENT_FILE = "announcement.json"
-
-def load_announcement():
-    """載入側邊欄公告"""
-    if not os.path.exists(ANNOUNCEMENT_FILE):
-        return {
-            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
-            "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
-        }
-    try:
-        with open(ANNOUNCEMENT_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {"content": "歡迎使用選股工具！", "date": ""}
-
-def save_announcement(data):
-    """儲存側邊欄公告"""
-    try:
-        with open(ANNOUNCEMENT_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        st.error(f"儲存公告失敗: {e}")
-
-# ==================== 網頁專用精美 HTML 除息行事曆渲染器 ====================
-def render_streamlit_calendar(year, month, events):
-    """
-    利用純 HTML 渲染除息行事曆，支援瀏覽器原生 Tooltip 浮動提示
-    """
-    import calendar
-    cal = calendar.Calendar(calendar.SUNDAY)
-    month_days = cal.monthdayscalendar(year, month)
-    
-    # 星期標頭
-    headers = ["日", "一", "二", "三", "四", "五", "六"]
-    header_html = "".join([f"<th style='text-align: center; font-weight: bold; background: #f0f2f6; padding: 6px; border: 1px solid #e6e9ef;'>{h}</th>" for h in headers])
-    
-    rows_html = []
-    for week in month_days:
-        row_cells = []
-        for day in week:
-            if day == 0:
-                row_cells.append("<td style='border: 1px solid #e6e9ef; height: 45px;'></td>")
-            else:
-                target_date = datetime(year, month, day).date()
-                day_events = events.get(target_date, [])
-                
-                cell_style = "border: 1px solid #e6e9ef; height: 45px; text-align: center; vertical-align: middle; font-size: 14px;"
-                
-                if day_events:
-                    tooltip_text = f"除息預告 ({year}/{month:02d}/{day:02d})：&#13;" + "&#13;".join([f"{ev['code']} {ev['name']}: {ev['amount']}" for ev in day_events])
-                    row_cells.append(
-                        f"<td style='{cell_style} background-color: #ffcccc; color: #cc0000; font-weight: bold; cursor: pointer;' "
-                        f"title='{tooltip_text}'>{day}</td>"
-                    )
-                else:
-                    now_tw = datetime.now(timezone(timedelta(hours=8))).date()
-                    if target_date == now_tw:
-                        row_cells.append(f"<td style='{cell_style} background-color: #007bff; color: white; font-weight: bold;'>{day}</td>")
-                    else:
-                        row_cells.append(f"<td style='{cell_style}'>{day}</td>")
-        rows_html.append(f"<tr>{''.join(row_cells)}</tr>")
-        
-    html_table = f"""
-    <table style='width: 100%; border-collapse: collapse; font-family: sans-serif;'>
-        <thead><tr>{header_html}</tr></thead>
-        <tbody>{''.join(rows_html)}</tbody>
-    </table>
-    """
-    return html_table
-
-# ==================== 雅虎財報 EPS 欄位模糊相容性解析器 ====================
-def get_eps_from_stmt(stmt):
-    """
-    自動適應雅虎財報在不同時期、不同個股所回傳的 EPS 欄位鍵名
-    """
-    if stmt is None or stmt.empty:
-        return None
-    for key in ['Basic EPS', 'Diluted EPS', 'BasicEarningsPerShare', 'DilutedEarningsPerShare', 'Basic', 'Diluted']:
-        if key in stmt.index:
-            return stmt.loc[key]
-    for idx in stmt.index:
-        if "EPS" in str(idx) or "Earnings Per Share" in str(idx):
-            return stmt.loc[idx]
-    return None
-
-def get_quarter_str(date_obj):
-    """
-    將財報日期轉換為季度標記字串，例如 2025Q3
-    """
-    try:
-        dt = pd.to_datetime(date_obj)
-        q = (dt.month - 1) // 3 + 1
-        return f"{dt.year}Q{q}"
-    except:
-        return ""
-
-# ==================== 側邊欄網站人氣統計與公告看板 ====================
-st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>網站數據統計</h3>", unsafe_allow_html=True)
-
-# 雲端永久人氣計數器 (使用 hitscounter.dev 提供永久累積與更新，網址經由 URL 編碼確保唯一性)
-visitor_badge_url = "https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fgrace120429%2Fmy-stock-web&label=Total%20Views&color=%23007bff"
-
-st.sidebar.markdown(
-    f"""
-    <div style='text-align: center; margin-bottom: 20px;'>
-        <img src='{visitor_badge_url}' alt='Views'/>
-    </div>
-    """, 
-    unsafe_allow_html=True
-)
-
-st.sidebar.markdown(
-    """
-    <div style='text-align: center; color: gray; font-size: 11px;'>
-        提示：本計數器由雲端數據庫提供永久累計，每一次頁面載入皆會即時更新。
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# 側邊欄管理者公告看板
-st.sidebar.write("---")
-st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>📢 管理者公告</h3>", unsafe_allow_html=True)
-ann_data = load_announcement()
-st.sidebar.markdown(
-    f"""
-    <div style='background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);'>
-        <p style='color: #64748b; font-size: 11px; font-weight: 500; margin-bottom: 6px;'>更新時間：{ann_data.get('date', 'N/A')}</p>
-        <p style='color: #1e293b; font-size: 13px; white-space: pre-wrap; line-height: 1.5; margin-bottom: 0;'>{ann_data.get('content', '暫無公告')}</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# ==================== 頁首資訊 ====================
-st.title("台股三大法人飆股選股工具 by Kelly")
-
-# 載入即時台幣匯率與集保資料日期
-twd_str = data_fetcher.fetch_twd_data()
-st.info(f"{twd_str}")
-
-# 載入自訂主力券商與分點設定 (確保所有分頁與模組均能讀取)
-brokers_dict = storage.load_custom_brokers()
-
-# ==================== 🚀 建立六大分頁 (台股強勢漲幅榜插入為分頁二) ====================
-tab1, tab_rank, tab2, tab3, tab4, tab5 = st.tabs([
-    "三大法人選股大數據", 
-    "📈 台股強勢漲幅榜", 
-    "我的自選監控", 
-    "主力券商進出", 
-    "台灣熱門 ETF 配息專區",
-    "讀者交流留言區"
-])
 
 # ==================== 【分頁一：三大法人選股大數據】 ====================
 with tab1:
@@ -763,6 +587,7 @@ with tab1:
                                     q_eps_series = get_eps_from_stmt(q_stmt)
                                     a_eps_series = get_eps_from_stmt(a_stmt)
                                     
+                                    # 🚀 語法錯誤修正：將原先打錯連在一起的 emptyand 修正為正確帶空格的 empty and
                                     if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
@@ -1033,8 +858,8 @@ with tab_rank:
     st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障、正則相容與全新 100% 同步的第 6 版自癒排行 API
-        rank_data = fetch_stock_rankings_cached_v6(period="day")
+        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障、正則相容與全新 100% 同步的第 7 版自癒排行 API
+        rank_data = fetch_stock_rankings_cached_v7(period="day")
         
     if rank_data:
         df_rank = pd.DataFrame(rank_data)
