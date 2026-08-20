@@ -198,10 +198,10 @@ def create_yf_session():
     })
     return session
 
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V3 官方欄位修正版) ====================
-# 💡 升級：為徹底刷新 Streamlit 之前失敗記錄的 0.0 舊快取，此處將快取函數升級至第 3 版
+# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V4 官方欄位修正版) ====================
+# 💡 升級：為徹底刷新 Streamlit 之前失敗記錄的 0.0 舊快取，此處將快取函數升級至第 4 版
 @st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v3(period="day"):
+def fetch_stock_rankings_cached_v4(period="day"):
     """
     極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
     此函數直接定義在 app.py 中，並具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
@@ -254,7 +254,7 @@ def fetch_stock_rankings_cached_v3(period="day"):
     session = create_yf_session()
     all_stocks = []
     
-    # 輪替各券商主機
+    # 在多個券商主機之間進行自癒輪替
     for host in hosts:
         all_stocks = []
         try:
@@ -280,18 +280,28 @@ def fetch_stock_rankings_cached_v3(period="day"):
                     for tr in soup.find_all('tr'):
                         tr_str = str(tr)
                         if "GenLink2stk" in tr_str:
-                            match = re.search(r"GenLink2stk\('(?:AS|OT)?(\w+)','([^']+)'\)", tr_str)
+                            # 🚀 關鍵正則表達式修正：相容單引號、雙引號、空格以及 AS/OT 前綴，完美精準抓取代碼 [2]
+                            match = re.search(r"GenLink2stk\(\s*['\"](?:AS|OT)?(\w+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", tr_str)
                             if match:
                                 code = match.group(1)
                                 name = match.group(2)
                                 tds = tr.find_all('td')
                                 if len(tds) >= 5:
                                     close_price = tds[2].text.strip()
-                                    change = tds[3].text.strip()
-                                    pct_change_str = tds[4].text.strip().replace('%', '').strip()
                                     
+                                    # 🚀 關鍵欄位索引修正：
+                                    # 在 5日 與 20日 排行的 Moneydj 表格中，本日漲跌與漲幅位在 td[3], td[4]，
+                                    # 而真正累計的 5日/20日 漲跌與漲幅則位在右方的 td[6], td[7]！ [1]
+                                    if d_param in [5, 20] and len(tds) >= 8:
+                                        change = tds[6].text.strip()
+                                        pct_change_str = tds[7].text.strip()
+                                    else:
+                                        change = tds[3].text.strip()
+                                        pct_change_str = tds[4].text.strip()
+                                        
+                                    pct_change_clean = pct_change_str.replace('+', '').replace('%', '').strip()
                                     try:
-                                        pct_change_val = float(pct_change_str)
+                                        pct_change_val = float(pct_change_clean)
                                     except ValueError:
                                         pct_change_val = 0.0
                                         
@@ -301,7 +311,7 @@ def fetch_stock_rankings_cached_v3(period="day"):
                                         "收盤價": close_price,
                                         "本日漲跌": change,
                                         "本次區間漲幅_val": pct_change_val,
-                                        "本次區間漲幅": f"{pct_change_str}%" if "%" not in tds[4].text else tds[4].text.strip(),
+                                        "本次區間漲幅": f"{pct_change_clean}%" if "%" not in pct_change_str else pct_change_str,
                                         "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
                                     })
             
@@ -509,7 +519,7 @@ with tab1:
             
             cap_filter_opt = st.selectbox(
                 "股本大小篩選：",
-                options=["不限股本", "中小型股 (股本 < 50億)", "小型股 (股本 < 20億)", "微型股 (股本 < 10億)", "中大型股 (股本 >= 50億)"],
+                options=["not limit", "中小型股 (股本 < 50億)", "小型股 (股本 < 20億)", "微型股 (股本 < 10億)", "中大型股 (股本 >= 50億)"],
                 index=0,
                 key="tab1_cap_filter"
             )
@@ -1054,8 +1064,8 @@ with tab_rank:
     selected_period_key = period_key_map[rank_period]
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 呼叫直接定義在本檔案中的 V3 快取排行榜，解決 Attribute Error 問題
-        rank_data = fetch_stock_rankings_cached_v3(period=selected_period_key)
+        # 🚀 呼叫直接定義在本檔案中的 V4 快取排行榜，徹底刷新舊快取，支援多引號相容正則與動態第 8 欄區間值提取
+        rank_data = fetch_stock_rankings_cached_v4(period=selected_period_key)
         
     if rank_data:
         df_rank = pd.DataFrame(rank_data)
@@ -1104,7 +1114,7 @@ with tab_rank:
                     else:
                         st.info("您選取的股票都已經在您的自選名單中囉！")
     else:
-        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍候重試。")
+        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍後重試。")
 
 # ==================== 【分頁三：我的自選監控】 ====================
 with tab2:
