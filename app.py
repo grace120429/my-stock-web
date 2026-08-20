@@ -186,7 +186,7 @@ if "margin_is_fallback" not in st.session_state:
 def create_yf_session():
     """
     改用 100% 安全、不當機的標準純 Python requests Session。
-    配備 Chrome 偽裝標頭，防止 Yahoo 429 阻擋！
+    配備 Chrome 偽裝裝頭，防止 Yahoo 429 阻擋！
     """
     import requests as std_requests
     session = std_requests.Session()
@@ -203,7 +203,7 @@ def create_yf_session():
 @st.cache_data(ttl=1800)
 def fetch_stock_rankings_cached_v4(period="day"):
     """
-    極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個幅前 25 名。
+    極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
     此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
     """
     import re
@@ -280,7 +280,7 @@ def fetch_stock_rankings_cached_v4(period="day"):
                     for tr in soup.find_all('tr'):
                         tr_str = str(tr)
                         if "GenLink2stk" in tr_str:
-                            # 🚀 關鍵正則表達式修正：相容單引號、雙引號、空格以及 AS/OT 前綴，完美精準抓取代碼 [2]
+                            # 🚀 關鍵正則表達式修正：相容單引號、雙引號、空格以及 AS/OT 前綴，完美精準抓取代碼
                             match = re.search(r"GenLink2stk\(\s*['\"](?:AS|OT)?(\w+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", tr_str)
                             if match:
                                 code = match.group(1)
@@ -775,7 +775,7 @@ with tab1:
                                     q_eps_series = get_eps_from_stmt(q_stmt)
                                     a_eps_series = get_eps_from_stmt(a_stmt)
                                     
-                                    if q_eps_series is not None and not q_eps_series.emptyand a_eps_series is not None and not a_eps_series.empty:
+                                    if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
                                         q_str = get_quarter_str(q_date)
