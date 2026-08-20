@@ -1,7 +1,7 @@
 # data_fetcher.py
 import time
 import re
-import random  # 💡 引入隨機模組用於輪替瀏覽器標頭
+import random
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import yfinance as yf
@@ -17,24 +17,21 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
     """
     當 Yahoo Finance 徹底被 429 阻擋封鎖時，此處啟動「官方雙月歷史日行情直連自癒機制」。
     向台灣證交所與櫃買中心官方 JSON API 查詢「本月」與「前一個月」的個股日成交行情，
-    並拼接成 K 線 DataFrame！這是不限海外 IP、100% 穩定的官方直連方案。 [1]
+    並拼接成 K 線 DataFrame。
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     now_tw = datetime.now(timezone(timedelta(hours=8)))
-    # 取得本月與上個月的首日 YYYYMM01 字串
     current_month_str = now_tw.strftime("%Y%m01")
     last_month_date = now_tw - timedelta(days=28)
     last_month_str = last_month_date.strftime("%Y%m01")
     
     closes, opens, highs, lows, volumes, dates = [], [], [], [], [], []
     
-    # 進行本月與上月的雙月抓取
     for month_query in [last_month_str, current_month_str]:
         if is_listed:
-            # 1. 上市股票直連證交所官方 STOCK_DAY API
             url = f"https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date={month_query}&stockNo={code}"
             try:
                 res = unsafe_session.get(url, headers=headers, timeout=6, verify=False)
@@ -44,7 +41,6 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
                     if data:
                         for row in data:
                             if len(row) >= 7:
-                                # 民國日期 "115/08/03" -> 轉換為 Datetime
                                 date_raw = str(row[0]).strip()
                                 parsed_dt = helpers.parse_taiwan_date(date_raw)
                                 if parsed_dt:
@@ -53,7 +49,7 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
                                         p_high = float(row[4].replace(',', '').strip())
                                         p_low = float(row[5].replace(',', '').strip())
                                         p_close = float(row[6].replace(',', '').strip())
-                                        p_vol = float(row[1].replace(',', '').strip())  # 成交股數
+                                        p_vol = float(row[1].replace(',', '').strip())
                                         
                                         dates.append(datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, tzinfo=timezone(timedelta(hours=8))))
                                         opens.append(p_open)
@@ -66,8 +62,6 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
             except:
                 pass
         else:
-            # 2. 上櫃股票直連櫃買中心官方 daily_trading_info API
-            # 民國月份格式 例如 "115/08"
             try:
                 yr = int(month_query[:4]) - 1911
                 mo = month_query[4:6]
@@ -92,7 +86,7 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
                                         p_high = float(row[4].replace(',', '').strip())
                                         p_low = float(row[5].replace(',', '').strip())
                                         p_close = float(row[6].replace(',', '').strip())
-                                        p_vol = float(row[1].replace(',', '').strip())  # 成交股數
+                                        p_vol = float(row[1].replace(',', '').strip())
                                         
                                         dates.append(datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, tzinfo=timezone(timedelta(hours=8))))
                                         opens.append(p_open)
@@ -105,7 +99,6 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
             except:
                 pass
                 
-    # 組合 DataFrame
     if dates and closes:
         df = pd.DataFrame({
             "Open": opens,
@@ -116,7 +109,6 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
             "Dividends": [0.0] * len(dates),
             "Stock Splits": [0.0] * len(dates)
         }, index=dates)
-        # 去除重複日期索引並由舊到新排序
         df = df[~df.index.duplicated(keep='first')].sort_index()
         return df
     return pd.DataFrame()
@@ -125,7 +117,6 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
 def fetch_historical_data_direct_fallback(ticker, range_str="6mo"):
     """
     當 yfinance 遭到 429 封鎖時，此函式使用原生 requests 直接連線 Yahoo Query1 Chart API。
-    搭配偽裝隨機 Chrome/Safari 標頭與直接 JSON 解析，高機率繞過 429 限制！ [1]
     """
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -134,7 +125,6 @@ def fetch_historical_data_direct_fallback(ticker, range_str="6mo"):
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     ]
     
-    # 轉換 period 為 Chart API 採用的 range 參數
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={range_str}&interval=1d"
     headers = {
         "User-Agent": random.choice(user_agents),
@@ -157,14 +147,12 @@ def fetch_historical_data_direct_fallback(ticker, range_str="6mo"):
                     quote = indicators.get("quote", [{}])[0]
                     adjclose = indicators.get("adjclose", [{}])[0].get("adjclose", [])
                     
-                    # 擷取 K 線數據
                     opens = quote.get("open", [])
                     highs = quote.get("high", [])
                     lows = quote.get("low", [])
-                    closes = quote.get("close", []) if not adjclose else adjclose  # 優先採用調整後收盤價
+                    closes = quote.get("close", []) if not adjclose else adjclose
                     volumes = quote.get("volume", [])
                     
-                    # 擷取歷史配息事件 (確保 ETF 功能不受影響) [1]
                     dividends_col = [0.0] * len(timestamp)
                     events = res_data.get("events", {})
                     dividends_data = events.get("dividends", {})
@@ -178,7 +166,6 @@ def fetch_historical_data_direct_fallback(ticker, range_str="6mo"):
                             except:
                                 pass
                     
-                    # 轉換為 Pandas DataFrame (欄位與 yfinance 保持完全一致)
                     if timestamp and opens and closes:
                         dates = [datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=8))) for ts in timestamp]
                         df = pd.DataFrame({
@@ -201,11 +188,9 @@ def fetch_historical_data_direct_fallback(ticker, range_str="6mo"):
 # ==================== 歷史資料全域安全快取 ====================
 @st.cache_data(ttl=14400)
 def fetch_historical_data_cached(ticker, period="6mo"):
-    # 提取代碼與判斷上市櫃
     code = ticker.split('.')[0]
     is_listed = ".TW" in ticker.upper()
 
-    # 1. 優先嘗試標準 yfinance 抓取
     try:
         stock = yf.Ticker(ticker, session=unsafe_session)
         hist = stock.history(period=period)
@@ -214,24 +199,18 @@ def fetch_historical_data_cached(ticker, period="6mo"):
     except Exception:
         pass
         
-    # 2. 若被 429 阻擋，自動啟用「原生 JSON 直接連線自癒機制」繞過封鎖 [1]
     hist_fallback = fetch_historical_data_direct_fallback(ticker, range_str=period)
     if hist_fallback is not None and not hist_fallback.empty:
         return hist_fallback
         
-    # 3. 💡 終極自癒防護：若前兩者皆被 Yahoo 阻擋（雲端 IP 被完全封鎖），自動直連台灣官方「證交所/櫃買中心」 [1]
     hist_official = fetch_historical_data_official_fallback(code, is_listed=is_listed)
     if hist_official is not None and not hist_official.empty:
         return hist_official
         
-    # 三者皆墨才拋出錯誤，確保 Streamlit 不快取失敗空值 [1]
-    raise RuntimeError(f"All 3 K-line sources (Yahoo, Direct, and TWSE Official) failed for {ticker}")
+    raise RuntimeError(f"All 3 K-line sources failed for {ticker}")
 
 # ==================== 上市法人買賣超資料抓取 (TWSE) ====================
 def fetch_twse_t86(date_str):
-    """
-    抓取上市法人買賣超日報
-    """
     url = f"https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date={date_str}&selectType=ALLBUT0999"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -261,9 +240,6 @@ def fetch_twse_t86(date_str):
 
 # ==================== 上櫃法人買賣超資料抓取 (TPEx) ====================
 def fetch_tpex_t86(date_str):
-    """
-    抓取櫃買中心(TPEx)上櫃法人買賣超日報
-    """
     try:
         year = int(date_str[:4])
         month = date_str[4:6]
@@ -496,6 +472,7 @@ def fetch_monthly_revenue():
     return revenue_dict
 
 # ==================== 毫秒級個股/ETF 中文名稱搜尋 ====================
+@st.cache_data(ttl=86400)  # 快取個股中文名稱，避免每次都向 Yahoo 重複發送請求
 def fetch_stock_name_fast(code):
     url = f"https://tw.stock.yahoo.com/quote/{code}"
     headers = {
@@ -528,7 +505,6 @@ def fetch_stock_name_fast(code):
 # ==================== 多週期籌碼資料流調度與雙市場標準化合併處理 (快取自癒版) ====================
 @st.cache_data(ttl=7200)
 def get_recent_data_cached(days_count=3):
-    """將此最重耗能（包含多個 sleep 延遲）的每日籌碼計算徹底快取"""
     return get_recent_data(days_count=days_count)
 
 def get_recent_data(days_count=3, progress_callback=None):
@@ -554,7 +530,7 @@ def get_recent_data(days_count=3, progress_callback=None):
             progress_callback(len(valid_dfs) + 1, days_count, date_str)
             
         df_twse = fetch_twse_t86(date_str)
-        time.sleep(0.3)
+        time.sleep(0.1)  # 縮減等待時間，大幅加快執行速度
         df_tpex = fetch_tpex_t86(date_str)
         
         df_combined = None
@@ -565,8 +541,7 @@ def get_recent_data(days_count=3, progress_callback=None):
         elif df_tpex is not None:
             df_combined = df_tpex
             
-        delay = 1.0 if days_count >= 30 else 2.0
-        time.sleep(delay) 
+        time.sleep(0.1)  # 移除原本 1.0 ~ 2.0 秒的高耗時等待，避免 Cloud 超時中斷
         
         if df_combined is not None:
             valid_dfs.append(df_combined)
@@ -597,6 +572,7 @@ def fetch_twd_data():
     return twd_str
 
 # ==================== 集保大戶比例 CSV 串流解析 ====================
+@st.cache_data(ttl=86400)  # 快取 24 小時，避免每次頁面渲染都重複下載巨大的 CSV
 def fetch_tdcc_data():
     url = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5"
     headers = {
@@ -641,6 +617,7 @@ def fetch_tdcc_data():
     return None, None
 
 # ==================== 官方未來除息日程表 ====================
+@st.cache_data(ttl=14400)  # 快取 4 小時
 def fetch_upcoming_dividends():
     upcoming_dict = {}
     headers = {
@@ -882,11 +859,8 @@ def fetch_etf_dividend_details(code, upcoming_dict):
         print(f"Error fetching ETF {code}: {e}")
         return None
 
-# ==================== 主力券商特定統計天數交易資料抓取 ====================
+# ==================== 爬取指定個股全台分點排行 ====================
 def fetch_stock_top_brokers(code, days=5):
-    """
-    爬取指定個股全台「買超」與「賣超」前 10 名的分點券商排行
-    """
     days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
@@ -1024,7 +998,7 @@ def fetch_stock_financials_cached(ticker):
     except Exception:
         return None, None
 
-# ==================== 全市場上市櫃股票實收資本額 (股本) 抓取 (自癒雙模版) ====================
+# ==================== 全市場上市櫃股票實收資本額 (股本) 抓取 ====================
 @st.cache_data(ttl=14400)
 def fetch_stock_capitals():
     headers = {
@@ -1110,21 +1084,14 @@ def fetch_stock_capitals():
             
     return capital_dict
 
-# ==================== 一鍵抓取全市場當日收盤行情快照 (極速防阻擋) ====================
-@st.cache_data(ttl=1800)  # 快取 30 分鐘，兼顧即時性與防刷限制
+# ==================== 一鍵抓取全市場當日收盤行情快照 ====================
+@st.cache_data(ttl=1800)
 def fetch_all_daily_prices():
-    """
-    一鍵抓取全市場「上市」與「上櫃」所有個股的當日收盤價、漲跌幅行情快照。
-    上市對接證交所 STOCK_DAY_ALL
-    上櫃對接櫃買中心 tpex_mainboard_daily_close_quotes
-    只需 2 個 HTTP 請求即可獲取全台股 2000 檔個股現價，完全避免迴圈請求導致的 429 阻擋！
-    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     price_dict = {}
     
-    # 1. 抓取上市個股當日行情
     url_twse = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     try:
         res = std_requests.get(url_twse, headers=headers, timeout=10, verify=False)
@@ -1147,7 +1114,6 @@ def fetch_all_daily_prices():
     except Exception:
         pass
         
-    # 2. 抓取上櫃個股當日行情
     url_tpex = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
     try:
         res = std_requests.get(url_tpex, headers=headers, timeout=10, verify=False)
@@ -1158,7 +1124,6 @@ def fetch_all_daily_prices():
                     code = str(row.get("SecuritiesCompanyCode", "")).strip()
                     if code:
                         try:
-                            # 櫃買數據清洗多餘空白與逗號
                             close_str = str(row.get("Close", "0")).replace(',', '').strip()
                             change_str = str(row.get("PriceChange", "0")).replace(',', '').strip()
                             
