@@ -96,7 +96,7 @@ def fetch_stock_top_brokers_local(code, days=5):
     from bs4 import BeautifulSoup
     from data_fetcher import unsafe_session  # 沿用專案中的連線 Session 繞過限制
     
-    # 💡 升級：支援 15 天與大天數映射 [2]
+    # 💡 升級：支援 15 天與大天數映射
     days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
@@ -198,10 +198,10 @@ def create_yf_session():
     })
     return session
 
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V6 官方欄位修正版) ====================
-# 💡 升級：此處函數定義已完美同步修正為第 6 版
+# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V7 完美對齊刷新版) ====================
+# 💡 升級：此處函數定義與主程式排版徹底對齊為第 7 版，直接對應大數據 fetch_all_daily_prices_v3 函數
 @st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v6(period="day"):
+def fetch_stock_rankings_cached_v7(period="day"):
     """
     極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
     此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
@@ -219,8 +219,8 @@ def fetch_stock_rankings_cached_v6(period="day"):
     # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
     if period == "day":
         try:
-            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v6 當日大數據 API
-            prices = data_fetcher.fetch_all_daily_prices_v6()
+            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v3 當日大數據 API
+            prices = data_fetcher.fetch_all_daily_prices_v3()
             if prices:
                 all_stocks = []
                 for code, info in prices.items():
@@ -228,7 +228,7 @@ def fetch_stock_rankings_cached_v6(period="day"):
                     if len(code) == 4 and code.isdigit():
                         all_stocks.append({
                             "代號": code,
-                            "股票名稱": info.get("name") or data_fetcher.fetch_stock_name_fast(code),
+                            "股票名稱": info.get("name") if info.get("name") else "未知",
                             "收盤價": f"{info['price']:.1f}" if info['price'] > 0 else "0.0",
                             "本日漲跌": f"+{info['change']}" if info["change"] > 0 else str(info["change"]),
                             "本次區間漲幅_val": info["pct_change"],
@@ -239,7 +239,7 @@ def fetch_stock_rankings_cached_v6(period="day"):
                 for idx, item in enumerate(all_stocks):
                     item["排行"] = idx + 1
                 if len(all_stocks) > 0:
-                    return all_stocks[:50]
+                    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股（包括鼎元）悉數進榜！
         except Exception as e_day:
             print(f"Daily OpenAPI calculation failed: {e_day}")
 
@@ -999,7 +999,6 @@ with tab1:
                                 else:
                                     st.caption("無買超排行資料")
                             with col_s:
-                                st.markdown("🔴 **淨賣超排行 Top 10**")
                                 df_s = pd.DataFrame(all_sellers)
                                 if not df_s.empty:
                                     st.dataframe(df_s, use_container_width=True, hide_index=True)
@@ -1468,7 +1467,6 @@ with tab2:
                                 else:
                                     st.caption("無買超排行資料")
                             with col_s:
-                                st.markdown("🔴 **淨賣超排行 Top 10**")
                                 df_s = pd.DataFrame(all_sellers)
                                 if not df_s.empty:
                                     st.dataframe(df_s, use_container_width=True, hide_index=True)
