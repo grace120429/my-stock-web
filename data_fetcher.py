@@ -313,7 +313,11 @@ def fetch_tpex_t86(date_str):
     except Exception:
         return None
 
-# ==================== 全市場信用交易融資餘額抓取 ====================
+# ==================== 全市場信用交易融資餘額抓取 (快取自癒版) ====================
+@st.cache_data(ttl=7200)
+def fetch_all_margin_cached(date_str):
+    return fetch_all_margin(date_str)
+
 def fetch_all_margin(date_str):
     margin_dict = {}
     headers = {
@@ -377,7 +381,11 @@ def fetch_all_margin(date_str):
         
     return margin_dict
 
-# ==================== 證交所與櫃買中心每月營收 OpenAPI JSON 抓取 (自癒雙模版) ====================
+# ==================== 證交所與櫃買中心每月營收 OpenAPI JSON 抓取 (快取自癒版) ====================
+@st.cache_data(ttl=14400)
+def fetch_monthly_revenue_cached():
+    return fetch_monthly_revenue()
+
 def fetch_monthly_revenue():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -517,7 +525,12 @@ def fetch_stock_name_fast(code):
         pass
     return "未知"
 
-# ==================== 多週期籌碼資料流調度與雙市場標準化合併處理 ====================
+# ==================== 多週期籌碼資料流調度與雙市場標準化合併處理 (快取自癒版) ====================
+@st.cache_data(ttl=7200)
+def get_recent_data_cached(days_count=3):
+    """將此最重耗能（包含多個 sleep 延遲）的每日籌碼計算徹底快取"""
+    return get_recent_data(days_count=days_count)
+
 def get_recent_data(days_count=3, progress_callback=None):
     valid_dfs = []
     valid_dates = [] 
@@ -919,6 +932,11 @@ def fetch_stock_top_brokers(code, days=5):
         
     return buyers[:10], sellers[:10]
 
+# ==================== 自訂主力分點數據 (快取自癒版) ====================
+@st.cache_data(ttl=3600)
+def fetch_broker_net_buys_cached(broker_id, days):
+    return fetch_broker_net_buys(broker_id, days)
+
 def fetch_broker_net_buys(broker_id, days):
     broker_id = str(broker_id).upper()
     headers = {
@@ -981,6 +999,30 @@ def fetch_broker_net_buys(broker_id, days):
     except Exception:
         pass
     return broker_dict
+
+# ==================== 全市場個股財報財務數據 (快取自癒版) ====================
+@st.cache_data(ttl=14400)
+def fetch_stock_financials_cached(ticker):
+    """
+    快取個股的季度與年度財報，避免重覆存取 Yahoo Finance 造成連線延遲
+    """
+    import requests as std_requests
+    session = std_requests.Session()
+    session.verify = False
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36"
+    })
+    try:
+        stock = yf.Ticker(ticker, session=session)
+        try:
+            q_stmt = stock.quarterly_income_stmt
+            a_stmt = stock.income_stmt
+        except:
+            q_stmt = stock.quarterly_financials
+            a_stmt = stock.financials
+        return q_stmt, a_stmt
+    except Exception:
+        return None, None
 
 # ==================== 全市場上市櫃股票實收資本額 (股本) 抓取 (自癒雙模版) ====================
 @st.cache_data(ttl=14400)
@@ -1067,6 +1109,7 @@ def fetch_stock_capitals():
                     pass
             
     return capital_dict
+
 # ==================== 一鍵抓取全市場當日收盤行情快照 (極速防阻擋) ====================
 @st.cache_data(ttl=1800)  # 快取 30 分鐘，兼顧即時性與防刷限制
 def fetch_all_daily_prices():
