@@ -71,7 +71,7 @@ def load_announcement():
     """載入側邊欄公告"""
     if not os.path.exists(ANNOUNCEMENT_FILE):
         return {
-            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
+            "content": "歡迎造訪台股選股工具！",
             "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
         }
     try:
@@ -96,7 +96,7 @@ def fetch_stock_top_brokers_local(code, days=5):
     from bs4 import BeautifulSoup
     from data_fetcher import unsafe_session  # 沿用專案中的連線 Session 繞過限制
     
-    # 💡 升級：支援 15 天與大天數映射
+    # 💡 升級：支援 15 天與大天數映射 [2]
     days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
@@ -144,11 +144,49 @@ def fetch_stock_top_brokers_local(code, days=5):
         
     return buyers[:10], sellers[:10]
 
+# ==================== 頁面基本設定 ====================
+st.set_page_config(layout="wide", page_title="台股三大法人飆股選股工具")
+
+# ==================== 網頁美化：隱藏頂部工具列與底部商標 ====================
+hide_streamlit_style = """
+            <style>
+            /* 隱藏頂部黑條、編輯按鈕與 GitHub 貓咪圖示 */
+            header {visibility: hidden;}
+            /* 隱藏 Streamlit 的主選單按鈕 */
+            #MainMenu {visibility: hidden;}
+            /* 隱藏網頁最下方的 Made with Streamlit 商標 */
+            footer {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+# 初始化 yfinance 快取 (在 Session State 中，避免網頁重新整理時重複下載)
+if "yf_cache" not in st.session_state:
+    st.session_state.yf_cache = {}
+if "yf_60m_cache" not in st.session_state:
+    st.session_state.yf_60m_cache = {}
+
+# 初始化篩選結果記憶體，避免勾選時表格消失
+if "tab1_results" not in st.session_state:
+    st.session_state.tab1_results = None
+
+# 🚀 記憶防刷：初始化自選股緩存機制
+if "watchlist_df_cache" not in st.session_state:
+    st.session_state.watchlist_df_cache = None
+if "watchlist_last_codes" not in st.session_state:
+    st.session_state.watchlist_last_codes = []
+
+# 初始化融資回溯所需的狀態變數，避免 Rerun 時狀態丟失
+if "margin_date_used" not in st.session_state:
+    st.session_state.margin_date_used = ""
+if "margin_is_fallback" not in st.session_state:
+    st.session_state.margin_is_fallback = False
+
 # ==================== 100% 執行緒安全防阻擋連線產生器 ====================
 def create_yf_session():
     """
     改用 100% 安全、不當機的標準純 Python requests Session。
-    配備 Chrome 偽裝裝頭，防止 Yahoo 429 阻擋！
+    配備 Chrome 偽裝標頭，防止 Yahoo 429 阻擋！
     """
     import requests as std_requests
     session = std_requests.Session()
@@ -159,125 +197,6 @@ def create_yf_session():
         "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"
     })
     return session
-
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V7 完美對齊刷新版) ====================
-# 💡 升級：此處函數定義已完美同步修正為第 7 版，直接對應大數據 fetch_all_daily_prices_v3 函數
-@st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v7(period="day"):
-    """
-    極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
-    此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
-    """
-    import re
-    from bs4 import BeautifulSoup
-    
-    days_map = {
-        "day": 1,
-        "week": 5,
-        "month": 20
-    }
-    d_param = days_map.get(period, 1)
-    
-    # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
-    if period == "day":
-        try:
-            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v3 當日大數據 API
-            prices = data_fetcher.fetch_all_daily_prices_v3()
-            if prices:
-                all_stocks = []
-                for code, info in prices.items():
-                    # 過濾權證與特殊代碼，只保留 4 碼純股票
-                    if len(code) == 4 and code.isdigit():
-                        all_stocks.append({
-                            "代號": code,
-                            "股票名稱": info.get("name") if info.get("name") else "未知",
-                            "收盤價": f"{info['price']:.1f}" if info['price'] > 0 else "0.0",
-                            "本日漲跌": f"+{info['change']}" if info["change"] > 0 else str(info["change"]),
-                            "本次區間漲幅_val": info["pct_change"],
-                            "本次區間漲幅": f"{info['pct_change']:.2f}%",
-                            "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
-                        })
-                all_stocks.sort(key=lambda x: x["本次區間漲幅_val"], reverse=True)
-                for idx, item in enumerate(all_stocks):
-                    item["排行"] = idx + 1
-                if len(all_stocks) > 0:
-                    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股悉數進榜！
-        except Exception as e_day:
-            print(f"Daily OpenAPI calculation failed: {e_day}")
-
-    # 💡 終極自癒保障 2：如果是周/月排行（或每日排行 OpenAPI 故障時），採用「多本土券商 Moneydj 系統輪替抓取」
-    hosts = [
-        "https://fubon-ebrokerdj.fbs.com.tw",
-        "https://newjust.masterlink.com.tw",
-        "https://jdata.yuanta.com.tw",
-        "http://kgieworld.moneydj.com"
-    ]
-    
-    session = create_yf_session()
-    all_stocks = []
-    
-    # 在多個券商主機之間進行自癒輪替
-    for host in hosts:
-        all_stocks = []
-        try:
-            res_listed = session.get(f"{host}/z/zg/zg_A_0_{d_param}.djhtm", timeout=6)
-            res_otc = None
-            for otc_idx in [1, 3]:
-                try:
-                    r_temp = session.get(f"{host}/z/zg/zg_A_{otc_idx}_{d_param}.djhtm", timeout=4)
-                    if r_temp.status_code == 200 and "漲幅" in r_temp.content.decode('big5', errors='ignore'):
-                        res_otc = r_temp
-                        break
-                except:
-                    continue
-            
-            for res in [res_listed, res_otc]:
-                if res and res.status_code == 200:
-                    html = res.content.decode('big5', errors='ignore')
-                    soup = BeautifulSoup(html, 'html.parser')
-                    for tr in soup.find_all('tr'):
-                        tr_str = str(tr)
-                        if "GenLink2stk" in tr_str:
-                            match = re.search(r"GenLink2stk\(\s*['\"](?:AS|OT)?(\w+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", tr_str)
-                            if match:
-                                code = match.group(1)
-                                name = match.group(2)
-                                tds = tr.find_all('td')
-                                if len(tds) >= 5:
-                                    close_price = tds[2].text.strip()
-                                    if d_param in [5, 20] and len(tds) >= 8:
-                                        change = tds[6].text.strip()
-                                        pct_change_str = tds[7].text.strip()
-                                    else:
-                                        change = tds[3].text.strip()
-                                        pct_change_str = tds[4].text.strip()
-                                        
-                                    pct_change_clean = pct_change_str.replace('+', '').replace('%', '').strip()
-                                    try:
-                                        pct_change_val = float(pct_change_clean)
-                                    except ValueError:
-                                        pct_change_val = 0.0
-                                        
-                                    all_stocks.append({
-                                        "代號": code,
-                                        "股票名稱": name,
-                                        "收盤價": close_price,
-                                        "本日漲跌": change,
-                                        "本次區間漲幅_val": pct_change_val,
-                                        "本次區間漲幅": f"{pct_change_clean}%" if "%" not in pct_change_str else pct_change_str,
-                                        "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
-                                    })
-            if len(all_stocks) > 5:
-                break
-        except Exception as e:
-            print(f"Host {host} failed: {e}")
-            continue
-            
-    all_stocks.sort(key=lambda x: x["本次區間漲幅_val"], reverse=True)
-    for idx, item in enumerate(all_stocks):
-        item["排行"] = idx + 1
-        
-    return all_stocks[:50]
 
 # ==================== 留言區檔案讀寫輔助函數 ====================
 COMMENTS_FILE = "comments.json"
@@ -300,7 +219,31 @@ def save_comments(comments):
     except Exception as e:
         st.error(f"儲存留言失敗: {e}")
 
-# ==================== 🚀 網頁專用精美 HTML 除息行事曆渲染器 (重要補回) ====================
+# ==================== 側邊欄公告檔案讀寫輔助函數 ====================
+ANNOUNCEMENT_FILE = "announcement.json"
+
+def load_announcement():
+    """載入側邊欄公告"""
+    if not os.path.exists(ANNOUNCEMENT_FILE):
+        return {
+            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
+            "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+        }
+    try:
+        with open(ANNOUNCEMENT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {"content": "歡迎使用選股工具！", "date": ""}
+
+def save_announcement(data):
+    """儲存側邊欄公告"""
+    try:
+        with open(ANNOUNCEMENT_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"儲存公告失敗: {e}")
+
+# ==================== 網頁專用精美 HTML 除息行事曆渲染器 ====================
 def render_streamlit_calendar(year, month, events):
     """
     利用純 HTML 渲染除息行事曆，支援瀏覽器原生 Tooltip 浮動提示
@@ -326,7 +269,7 @@ def render_streamlit_calendar(year, month, events):
                 cell_style = "border: 1px solid #e6e9ef; height: 45px; text-align: center; vertical-align: middle; font-size: 14px;"
                 
                 if day_events:
-                    # 使用 HTML 實體 &#13; 實現 Tooltip 多行裝行顯示
+                    # 使用 HTML 實體 &#13; 實現 Tooltip 多行換行顯示 (移除 Emoji，保持簡潔商用風格)
                     tooltip_text = f"除息預告 ({year}/{month:02d}/{day:02d})：&#13;" + "&#13;".join([f"{ev['code']} {ev['name']}: {ev['amount']}" for ev in day_events])
                     row_cells.append(
                         f"<td style='{cell_style} background-color: #ffcccc; color: #cc0000; font-weight: bold; cursor: pointer;' "
@@ -422,10 +365,9 @@ st.info(f"{twd_str}")
 # 載入自訂主力券商與分點設定 (確保所有分頁與模組均能讀取)
 brokers_dict = storage.load_custom_brokers()
 
-# ==================== 🚀 建立六大分頁 (台股強勢漲幅榜插入為分頁二) ====================
-tab1, tab_rank, tab2, tab3, tab4, tab5 = st.tabs([
+# ==================== 建立五大分頁 ====================
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "三大法人選股大數據", 
-    "📈 台股強勢漲幅榜", 
     "我的自選監控", 
     "主力券商進出", 
     "台灣熱門 ETF 配息專區",
@@ -440,11 +382,13 @@ with tab1:
         col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.5, 2.5])
         
         with col_cfg1:
+            # 💡 籌碼天數
             days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 15, 30, 60, 120], index=0, key="tab1_days")
             
+            # 💡 股本大小篩選
             cap_filter_opt = st.selectbox(
                 "股本大小篩選：",
-                options=["not limit", "中小型股 (股本 < 50億)", "小型股 (股本 < 20億)", "微型股 (股本 < 10億)", "中大型股 (股本 >= 50億)"],
+                options=["不限股本", "中小型股 (股本 < 50億)", "小型股 (股本 < 20億)", "微型股 (股本 < 10億)", "中大型股 (股本 >= 50億)"],
                 index=0,
                 key="tab1_cap_filter"
             )
@@ -491,6 +435,7 @@ with tab1:
     st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。")
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
         with st.spinner("正在進行大數據分析，請稍候..."):
+            # 🚀 升級：使用快取版的籌碼抓取，大幅降低 API 重複查詢率
             dfs, t86_dates = data_fetcher.get_recent_data_cached(days_count=days_count)
             if not dfs:
                 st.error("無法自證交所取得資料。")
@@ -504,6 +449,7 @@ with tab1:
                 else:
                     tdcc_ratios, tdcc_changes = {}, {}
                 
+                # 🚀 升級：使用快取版融資餘額
                 margin_data = {}
                 margin_date_used = ""
                 st.session_state.margin_is_fallback = False
@@ -525,6 +471,7 @@ with tab1:
                 
                 st.session_state.margin_date_used = margin_date_used
                 
+                # 🚀 升級：使用快取版營收數據
                 revenue_data = data_fetcher.fetch_monthly_revenue_cached()
                 capital_data = data_fetcher.fetch_stock_capitals()
                 
@@ -534,6 +481,7 @@ with tab1:
                     for b_name in selected_broker_names:
                         broker_id = brokers_dict.get(b_name)
                         if broker_id:
+                            # 🚀 升級：使用快取版券商分點買超
                             broker_results = data_fetcher.fetch_broker_net_buys_cached(broker_id, days_param)
                             multi_broker_data[b_name] = {
                                 code: item for code, item in broker_results.items() if item["diff"] > 0
@@ -648,6 +596,7 @@ with tab1:
                         name = row_item['證券名稱']
                         ticker = f"{code}.TW"
                         
+                        # 股本大小過濾
                         stock_cap = capital_data.get(code, 0.0)
                         if cap_filter_opt == "中小型股 (股本 < 50億)" and stock_cap >= 50.0:
                             continue
@@ -673,6 +622,7 @@ with tab1:
                         try:
                             time.sleep(0.15)
                             
+                            # 🚀 升級：使用 K線快取抓取
                             try:
                                 if ticker in st.session_state.yf_cache:
                                     hist = st.session_state.yf_cache[ticker]
@@ -692,17 +642,18 @@ with tab1:
                             if hist.empty or len(hist) < 20:
                                 continue
                             
+                            # 箱型整理檢查
                             is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
                             if filter_box and not is_box:
                                 continue
                                 
                             if not is_code_etf:
                                 try:
+                                    # 🚀 升級：使用最新快取版個股財報財務數據，拒絕重複下載
                                     q_stmt, a_stmt = data_fetcher.fetch_stock_financials_cached(ticker)
                                     q_eps_series = get_eps_from_stmt(q_stmt)
                                     a_eps_series = get_eps_from_stmt(a_stmt)
                                     
-                                    # 🚀 語法修正：將原先打錯連在一起的 emptyand 修正為正確帶空格的 empty and
                                     if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
@@ -939,13 +890,14 @@ with tab1:
                                 else:
                                     st.caption("無買超排行資料")
                             with col_s:
+                                st.markdown("🔴 **淨賣超排行 Top 10**")
                                 df_s = pd.DataFrame(all_sellers)
                                 if not df_s.empty:
                                     st.dataframe(df_s, use_container_width=True, hide_index=True)
                                 else:
                                     st.caption("無賣超排行資料")
                         else:
-                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
+                            st.error("無法自交易所獲取全台主力排行，請稍候重試。")
                 
                 selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
                 st.write("")
@@ -958,6 +910,7 @@ with tab1:
                             added_count += 1
                     if added_count > 0:
                         save_local_watchlist(current_watchlist)
+                        # 🚀 記憶防刷：自選名單變動時清除快取，強制下次重新載入最新資料
                         st.session_state.watchlist_df_cache = None
                         st.success(f"已成功加入 {added_count} 檔股票至您的專屬自選股！")
                         time.sleep(0.8)
@@ -967,66 +920,7 @@ with tab1:
         else:
             st.warning("查無符合篩選條件之個股。")
 
-# ==================== 📈 【分頁二：台股強勢漲幅榜】(僅保留每日) ====================
-with tab_rank:
-    st.subheader("🔥 台股強勢漲幅排行榜 (Top 25 大飆股)")
-    st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
-    
-    with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障與符號解析的第 7 版自癒排行 API，解決所有連線與遺漏問題！
-        rank_data = fetch_stock_rankings_cached_v7(period="day")
-        
-    if rank_data:
-        df_rank = pd.DataFrame(rank_data)
-        
-        st.success("讀取完成！已成功加載 每日（本日最強） 前 25 檔最強勢飆股。")
-        st.caption("💡 提示：勾選左側框格，可在下方「一鍵加入我的自選股」進行批次關注！")
-        
-        # 🚀 修正：同時過濾掉「K線圖網址」與用來背景排序的「本次區間漲幅_val」輔助欄位，給予最簡潔乾淨的視覺體驗
-        display_rank_cols = [c for c in df_rank.columns if c not in ["K線圖網址", "本次區間漲幅_val"]]
-        
-        rank_event = st.dataframe(
-            df_rank[display_rank_cols],
-            column_config={
-                "排行": st.column_config.NumberColumn("排行", format="%d"),
-                "代號": st.column_config.TextColumn("代號"),
-                "收盤價": st.column_config.TextColumn("現價 / 收盤價"),
-                "本日漲跌": st.column_config.TextColumn("本日漲跌"),
-                "本次區間漲幅": st.column_config.TextColumn("漲幅 %", help="本日之區間累計漲跌幅"),
-            },
-            use_container_width=True,
-            on_select="rerun",
-            selection_mode="multi-row",
-            key="df_rank_table_day_only"
-        )
-        
-        # 處理一鍵加入自選股
-        selected_rank_rows = rank_event.selection.rows
-        if selected_rank_rows:
-            selected_rank_codes = df_rank.iloc[selected_rank_rows]["代號"].tolist()
-            st.write("")
-            col_rank_btn, _ = st.columns([1, 4])
-            with col_rank_btn:
-                if st.button("📥 一鍵加入我的自選股 (" + str(len(selected_rank_codes)) + " 檔)", type="primary"):
-                    current_watchlist = get_local_watchlist()
-                    added_cnt = 0
-                    for code in selected_rank_codes:
-                        if code and code not in current_watchlist:
-                            current_watchlist.append(code)
-                            added_cnt += 1
-                    if added_cnt > 0:
-                        save_local_watchlist(current_watchlist)
-                        # 清除自選股工作階段快取，強迫下次開啟自選監控時自動更新
-                        st.session_state.watchlist_df_cache = None
-                        st.success("已成功將 " + str(added_cnt) + " 檔強勢股加入您的自選監控名單！")
-                        time.sleep(0.8)
-                        st.rerun()
-                    else:
-                        st.info("您選取的股票都已經在您的自選名單中囉！")
-    else:
-        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍候重試。")
-
-# ==================== 【分頁三：我的自選監控】 ====================
+# ==================== 【分頁二：我的自選監控】 ====================
 with tab2:
     st.subheader("觀察名單即時監控")
     
@@ -1053,6 +947,7 @@ with tab2:
                         if new_watchlist_code not in watchlist:
                             watchlist.append(new_watchlist_code)
                             save_local_watchlist(watchlist)
+                            # 🚀 記憶防刷：自選名單變動時清除快取
                             st.session_state.watchlist_df_cache = None
                             st.success(f"已新增 {new_watchlist_code}！")
                             time.sleep(0.5)
@@ -1082,6 +977,7 @@ with tab2:
                         else:
                             updated_watchlist = [c for c in watchlist if c not in to_remove]
                             save_local_watchlist(updated_watchlist)
+                            # 🚀 記憶防刷：自選名單變動時清除快取
                             st.session_state.watchlist_df_cache = None
                             st.success(f"已成功從您的自選清單移除：{', '.join(to_remove)}！")
                             time.sleep(0.5)
@@ -1098,6 +994,7 @@ with tab2:
         if st.button("🔄 重新整理自選數據", use_container_width=True):
             st.session_state.yf_cache.clear()
             st.session_state.yf_60m_cache.clear()
+            # 🚀 記憶防刷：手動重整時徹底清除 Session 快取，強制重新向伺服器調閱新資料
             st.session_state.watchlist_df_cache = None
             st.success("快取已清除，正在重新抓取...")
             time.sleep(0.5)
@@ -1109,6 +1006,7 @@ with tab2:
             st.warning("目前監控清單為空。")
             
     if watchlist:
+        # 🚀 記憶防刷的核心邏輯：檢查股票代碼列表是否有改變、或緩存是否為空
         watchlist_changed = (watchlist != st.session_state.watchlist_last_codes)
         
         if st.session_state.watchlist_df_cache is None or watchlist_changed:
@@ -1117,6 +1015,7 @@ with tab2:
             yf_session_tab2 = create_yf_session()
             
             with st.spinner("正在分析自選股籌碼、財報與技術指標，請稍候..."):
+                # 🚀 升級：使用快取版籌碼抓取，避開 10 秒 API 延遲
                 chip_dfs, t86_dates = data_fetcher.get_recent_data_cached(days_count=5)
                 summary_chip = pd.DataFrame()
                 margin_data = {}
@@ -1162,6 +1061,7 @@ with tab2:
                     summary_chip['投信_張'] = summary_chip[col_trust] / 1000 if col_trust else 0
                     summary_chip['自營_張'] = summary_chip[col_dealer] / 1000 if col_dealer else 0
 
+                # 🚀 升級：使用快取版融資數據
                 if t86_dates:
                     sorted_dates = sorted(t86_dates, reverse=True)
                     for d_str in sorted_dates:
@@ -1202,6 +1102,7 @@ with tab2:
                         # 分析個股最新財報
                         if not is_code_etf_tab2:
                             try:
+                                # 🚀 升級：使用最新快取版個股財報財務數據，避免每次載入都在下載財報
                                 q_stmt, a_stmt = data_fetcher.fetch_stock_financials_cached(ticker)
                                 q_eps_series = get_eps_from_stmt(q_stmt)
                                 a_eps_series = get_eps_from_stmt(a_stmt)
@@ -1327,9 +1228,11 @@ with tab2:
                         errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
                         continue                  
             
+            # 🚀 寫入快取記憶：避免下一次點選操作重覆跑運算
             st.session_state.watchlist_df_cache = w_rows
             st.session_state.watchlist_last_codes = list(watchlist)
         else:
+            # 🚀 快取生效：直接讀取 session 記憶體的結果，省去 15 秒分析流程！
             w_rows = st.session_state.watchlist_df_cache
             errors_log_tab2 = []
 
@@ -1372,6 +1275,7 @@ with tab2:
                         broker_details_list = []
                         if brokers_dict:
                             for b_name, b_id in brokers_dict.items():
+                                # 🚀 升級：使用快取版主力券商特定天數交易資料抓取，避免頻繁發送外部 HTTP 請求
                                 b_data = data_fetcher.fetch_broker_net_buys_cached(b_id, days_param_tab2)
                                 if code in b_data:
                                     net_buy_wan = b_data[code]["diff"]
@@ -1407,21 +1311,22 @@ with tab2:
                                 else:
                                     st.caption("無買超排行資料")
                             with col_s:
+                                st.markdown("🔴 **淨賣超排行 Top 10**")
                                 df_s = pd.DataFrame(all_sellers)
                                 if not df_s.empty:
                                     st.dataframe(df_s, use_container_width=True, hide_index=True)
                                 else:
                                     st.caption("無賣超排行資料")
                         else:
-                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
+                            st.error("無法自交易所獲取全台主力排行，請稍候重試。")
         else:
-            st.warning("自選股數據 analysis 失敗，請查看下方診斷報告。")
+            st.warning("自選股數據分析失敗，請查看下方診斷報告。")
             
         if 'errors_log_tab2' in locals() and errors_log_tab2:
             with st.expander("⚠️ 查看自選背景診斷報告"):
                 st.write(errors_log_tab2)
 
-# ==================== 【分頁四：主力券商進出】 ====================
+# ==================== 【分頁三：主力券商進出】 ====================
 with tab3:
     st.subheader("特寫分點主力特定天數交易明細")
     
@@ -1471,6 +1376,7 @@ with tab3:
         b_id = brokers_dict.get(target_broker)
         
         with st.spinner("下載主力券商進出明細中..."):
+            # 🚀 升級：使用快取版主力統計抓取
             broker_results = data_fetcher.fetch_broker_net_buys_cached(b_id, days_param)
             if broker_results:
                 b_rows = []
@@ -1495,7 +1401,7 @@ with tab3:
             else:
                 st.error("無法自券商系統獲取資料，請稍後重試。")
 
-# ==================== 【分頁五：台灣熱門 ETF 配息與退休存錢筒】 ====================
+# ==================== 【分頁四：台灣熱門 ETF 配息與退休存錢筒】 ====================
 with tab4:
     now_tw = datetime.now(timezone(timedelta(hours=8)))
     if "cal_year" not in st.session_state:
@@ -1607,7 +1513,6 @@ with tab4:
                     st.session_state.cal_year += 1
                 st.rerun()
                 
-        # 🚀 完美補回：呼叫直接定義在 app.py 頂端的行事曆 HTML 渲染器
         html_cal = render_streamlit_calendar(
             st.session_state.cal_year, 
             st.session_state.cal_month, 
@@ -1719,7 +1624,7 @@ with tab4:
         else:
             st.info("存錢筒目前無持股，請新增您的 ETF 持股比例。")
 
-# ==================== 【分頁六：讀者交流留言區】 ====================
+# ==================== 【分頁五：讀者交流留言區】 ====================
 with tab5:
     st.subheader("💬 讀者交流留言區")
     
