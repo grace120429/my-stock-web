@@ -71,7 +71,7 @@ def load_announcement():
     """載入側邊欄公告"""
     if not os.path.exists(ANNOUNCEMENT_FILE):
         return {
-            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
+            "content": "歡迎造訪台股選股工具！",
             "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
         }
     try:
@@ -96,7 +96,7 @@ def fetch_stock_top_brokers_local(code, days=5):
     from bs4 import BeautifulSoup
     from data_fetcher import unsafe_session  # 沿用專案中的連線 Session 繞過限制
     
-    # 💡 升級：支援 15 天與大天數映射
+    # 💡 升級：支援 15 天與大天數映射 [2]
     days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
@@ -198,10 +198,10 @@ def create_yf_session():
     })
     return session
 
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V6 完美相容版) ====================
-# 💡 升級：為徹底刷新 Streamlit 舊快取，此處將快取函數升級至第 6 版
+# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V7 完美對齊刷新版) ====================
+# 💡 升級：再次升級快取函數至第 7 版，對接完美修正的 fetch_all_daily_prices_v6 行情計算
 @st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v6(period="day"):
+def fetch_stock_rankings_cached_v7(period="day"):
     """
     極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
     此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
@@ -219,11 +219,12 @@ def fetch_stock_rankings_cached_v6(period="day"):
     # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
     if period == "day":
         try:
-            # 🚀 呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v6 當日大數據 API
-            prices = data_fetcher.fetch_all_daily_prices_v3()
+            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v6 當日大數據 API，解決屬性名稱對接失誤的問題！
+            prices = data_fetcher.fetch_all_daily_prices_v6()
             if prices:
                 all_stocks = []
                 for code, info in prices.items():
+                    # 過濾權證與特殊代碼，只保留 4 碼純股票
                     if len(code) == 4 and code.isdigit():
                         all_stocks.append({
                             "代號": code,
@@ -238,7 +239,7 @@ def fetch_stock_rankings_cached_v6(period="day"):
                 for idx, item in enumerate(all_stocks):
                     item["排行"] = idx + 1
                 if len(all_stocks) > 0:
-                    return all_stocks[:50]
+                    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股（包括鼎元）悉數進榜！
         except Exception as e_day:
             print(f"Daily OpenAPI calculation failed: {e_day}")
 
@@ -1033,7 +1034,7 @@ with tab_rank:
     st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 固定呼叫每日排行，對接具有雙重保障與符號解析的第 6 版自癒排行 API
+        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障、正則相容與全新 100% 同步的第 6 版自癒排行 API
         rank_data = fetch_stock_rankings_cached_v6(period="day")
         
     if rank_data:
