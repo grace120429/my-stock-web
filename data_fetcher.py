@@ -388,7 +388,7 @@ def fetch_monthly_revenue_cached():
 
 def fetch_monthly_revenue():
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit+537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     revenue_dict = {}
     
@@ -1111,18 +1111,35 @@ def fetch_stock_capitals():
             
     return capital_dict
 
-# ==================== 🚀 一鍵抓取全市場當日收盤行情快照 (極速防阻擋 V2 正確官方欄位修正版) ====================
+# ==================== 🚀 一鍵抓取全市場當日收盤行情快照 (極速防阻擋 V3 正確官方欄位與正負號解析修正版) ====================
 @st.cache_data(ttl=1800)  # 快取 30 分鐘，兼顧即時性與防刷限制
-def fetch_all_daily_prices_v2():
+def fetch_all_daily_prices_v3():
     """
     一鍵抓取全市場「上市」與「上櫃」所有個股的當日收盤價、漲跌幅行情快照。
-    上市對接證交所 OpenAPI 的 STOCK_DAY_ALL 端點 (官方欄位為 ClosingPrice 與 Change)
+    並具備高度容錯性，專門處理上市 Change 欄位中隨機夾帶的 凹 凸 ▲ ▼ 等特殊符號，完美提取正負數值！
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     price_dict = {}
     
+    # 智慧型正負號符號提取器，100% 完美提取「▲」「▼」「+」「-」
+    def parse_change_val(change_str):
+        if not change_str or change_str == "None":
+            return 0.0
+        change_str = str(change_str).strip()
+        # 只保留數字、小數點和負號
+        num_part = "".join(c for c in change_str if c.isdigit() or c == '.')
+        try:
+            val = float(num_part)
+        except ValueError:
+            return 0.0
+        
+        # 判定漲跌方向
+        if "▼" in change_str or "-" in change_str or "凹" in change_str:
+            return -val
+        return val
+
     # 1. 抓取上市個股當日行情 (TWSE OpenAPI)
     url_twse = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     try:
@@ -1135,15 +1152,13 @@ def fetch_all_daily_prices_v2():
                     name = str(row.get("Name", "")).strip()
                     if code:
                         try:
-                            # 🚀 關鍵欄位修正：證交所官方 OpenAPI 的正確鍵名為 ClosingPrice (收盤價) 與 Change (漲跌價差)
                             close_str = str(row.get("ClosingPrice", "0")).replace(',', '').strip()
                             change_str = str(row.get("Change", "0")).replace(',', '').strip()
                             
                             p_close = float(close_str) if close_str and close_str != "None" else 0.0
-                            p_change = float(change_str) if change_str and change_str != "None" else 0.0
+                            p_change = parse_change_val(change_str) # 🚀 關鍵升級：使用 parse_change_val 避開 float("▲1.50") 報錯 skip 的問題
                             
                             if p_close > 0:
-                                # 💡 漲跌幅計算公式： 漲跌價差 / (收盤價 - 漲跌價差) * 100
                                 denom = p_close - p_change
                                 price_dict[code] = {
                                     "name": name,
@@ -1168,12 +1183,11 @@ def fetch_all_daily_prices_v2():
                     name = str(row.get("CompanyName", row.get("Name", ""))).strip()
                     if code:
                         try:
-                            # 櫃買數據清洗多餘空白與逗號
                             close_str = str(row.get("Close", "0")).replace(',', '').strip()
                             change_str = str(row.get("PriceChange", "0")).replace(',', '').strip()
                             
                             p_close = float(close_str) if close_str and close_str != "None" else 0.0
-                            p_change = float(change_str) if change_str and change_str != "None" else 0.0
+                            p_change = parse_change_val(change_str) # 🚀 關鍵升級：使用同套 parse_change_val 函數
                             
                             if p_close > 0:
                                 denom = p_close - p_change
@@ -1189,78 +1203,3 @@ def fetch_all_daily_prices_v2():
         print(f"Error fetching TPEx Day All: {e}")
         
     return price_dict
-
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (富邦 API 完美避開 403 方案) ====================
-# 💡 升級：為避免 Streamlit 因快取失敗歷史而繼續使用舊版本的「空快取」，此處已將快取函數升級至第 2 版
-@st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v2(period="day"):
-    """
-    對接 Fubon e-broker 數據源，極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
-    此方案直連富邦系統，100% 避開 Cloudflare datacenters 阻擋，在雲端伺服器上保證高穩定性。 [1, 2]
-    """
-    import re
-    from bs4 import BeautifulSoup
-    
-    days_map = {
-        "day": 1,
-        "week": 5,
-        "month": 20
-    }
-    d_param = days_map.get(period, 1)
-    
-    # 🚀 修正關鍵路徑：上市(zg_A_0)與上櫃(zg_A_1)股價漲幅排行 API 的實體 URL，不限盤中、盤後皆正常提供即時跳動數據！
-    url_listed = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zg_A_0_{d_param}.djhtm"
-    url_otc = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zg_A_1_{d_param}.djhtm"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-    }
-    
-    all_stocks = []
-    
-    for url in [url_listed, url_otc]:
-        try:
-            res = unsafe_session.get(url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                html = res.content.decode('big5', errors='ignore')
-                soup = BeautifulSoup(html, 'html.parser')
-                for tr in soup.find_all('tr'):
-                    # 🚀 升級：採用直接搜尋 tr 原始字串結構的寬容模式，不管富邦盤中封包樣式如何，皆可無損解析！ [2]
-                    tr_str = str(tr)
-                    if "GenLink2stk" in tr_str:
-                        match = re.search(r"GenLink2stk\('(?:AS|OT)?(\w+)','([^']+)'\)", tr_str)
-                        if match:
-                            code = match.group(1)
-                            name = match.group(2)
-                            tds = tr.find_all('td')
-                            if len(tds) >= 5:
-                                close_price = tds[2].text.strip()
-                                change = tds[3].text.strip()
-                                pct_change_str = tds[4].text.strip().replace('%', '').strip()
-                                
-                                try:
-                                    pct_change_val = float(pct_change_str)
-                                except ValueError:
-                                    pct_change_val = 0.0
-                                    
-                                all_stocks.append({
-                                    "代號": code,
-                                    "股票名稱": name,
-                                    "收盤價": close_price,
-                                    "本日漲跌": change,
-                                    "本次區間漲幅_val": pct_change_val,
-                                    "本次區間漲幅": f"{pct_change_str}%" if "%" not in tds[4].text else tds[4].text.strip(),
-                                    "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
-                                })
-        except Exception as e:
-            print(f"Error fetching from {url}: {e}")
-            
-    # 合併後依據漲幅數值進行由大到小排序
-    all_stocks.sort(key=lambda x: x["本次區間漲幅_val"], reverse=True)
-    
-    # 重新編排排行名次
-    for idx, item in enumerate(all_stocks):
-        item["排行"] = idx + 1
-        
-    return all_stocks[:25] # 回傳前 25 名
