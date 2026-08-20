@@ -920,7 +920,7 @@ with tab1:
         else:
             st.warning("查無符合篩選條件之個股。")
 
-# ==================== 📈 【分頁二：台股強勢漲幅榜】(🚀 新增) ====================
+# ==================== 📈 【分頁二：台股強勢漲幅榜】(🚀 新增 V2) ====================
 with tab_rank:
     st.subheader("🔥 台股強勢漲幅排行榜 (Top 25 大飆股)")
     st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
@@ -942,7 +942,8 @@ with tab_rank:
     selected_period_key = period_key_map[rank_period]
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        rank_data = data_fetcher.fetch_stock_rankings_cached(period=selected_period_key)
+        # 🚀 升級：對接 data_fetcher 新開發的第 2 版強勢排行榜 API，徹底刷新舊快取
+        rank_data = data_fetcher.fetch_stock_rankings_cached_v2(period=selected_period_key)
         
     if rank_data:
         df_rank = pd.DataFrame(rank_data)
@@ -1363,7 +1364,7 @@ with tab2:
                         st.write("")
                         st.markdown("**🔥 全台所有分點 - 買賣超前 10 名排行 (不設限自選)：**")
                         with st.spinner(f"正在向系統調閱 {code} 的全台主力排行..."):
-                            all_buyers, all_sellers = fetch_stock_top_brokers_local(code, days=days_param_tab2)
+                            all_buyers, all_buyers = fetch_stock_top_brokers_local(code, days=days_param_tab2)
                             
                         if all_buyers or all_sellers:
                             col_b, col_s = st.columns(2)
@@ -1384,7 +1385,7 @@ with tab2:
                         else:
                             st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
         else:
-            st.warning("自選股數據分析失敗，請查看下方診斷報告。")
+            st.warning("自選股數據 analysis 失敗，請查看下方診斷報告。")
             
         if 'errors_log_tab2' in locals() and errors_log_tab2:
             with st.expander("⚠️ 查看自選背景診斷報告"):
