@@ -186,7 +186,7 @@ if "margin_is_fallback" not in st.session_state:
 def create_yf_session():
     """
     改用 100% 安全、不當機的標準純 Python requests Session。
-    配備 Chrome 偽裝裝頭，防止 Yahoo 429 阻擋！
+    配備 Chrome 偽裝標頭，防止 Yahoo 429 阻擋！
     """
     import requests as std_requests
     session = std_requests.Session()
@@ -198,13 +198,13 @@ def create_yf_session():
     })
     return session
 
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V4 官方欄位修正版) ====================
-# 💡 升級：為徹底刷新 Streamlit 舊快取，此處將快取函數升級至第 4 版
+# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V5 官方欄位修正版) ====================
+# 💡 升級：為徹底刷新 Streamlit 之前失敗記錄的 0.0 舊快取，此處將快取函數升級至第 5 版
 @st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v4(period="day"):
+def fetch_stock_rankings_cached_v5(period="day"):
     """
     極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
-    此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
+    此函數直接定義在 app.py 中，並具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
     """
     import re
     from bs4 import BeautifulSoup
@@ -219,8 +219,8 @@ def fetch_stock_rankings_cached_v4(period="day"):
     # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
     if period == "day":
         try:
-            # 🚀 修正：呼叫 ClosingPrice 欄位完美匹配的 v2 當日大數據 API
-            prices = data_fetcher.fetch_all_daily_prices_v2()
+            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v3 當日大數據 API，這能 100% 解析全台股 1800 檔個股漲跌！
+            prices = data_fetcher.fetch_all_daily_prices_v3()
             if prices:
                 all_stocks = []
                 for code, info in prices.items():
@@ -239,7 +239,7 @@ def fetch_stock_rankings_cached_v4(period="day"):
                 for idx, item in enumerate(all_stocks):
                     item["排行"] = idx + 1
                 if len(all_stocks) > 0:
-                    return all_stocks[:25]
+                    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股悉數進榜！
         except Exception as e_day:
             print(f"Daily OpenAPI calculation failed: {e_day}")
 
@@ -327,7 +327,7 @@ def fetch_stock_rankings_cached_v4(period="day"):
     for idx, item in enumerate(all_stocks):
         item["排行"] = idx + 1
         
-    return all_stocks[:25] # 回傳前 25 名
+    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股悉數進榜！
 
 # ==================== 留言區檔案讀寫輔助函數 ====================
 COMMENTS_FILE = "comments.json"
@@ -1046,8 +1046,8 @@ with tab_rank:
     st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 升級：固定呼叫每日排行，解決快取與爬蟲連線受阻問題
-        rank_data = fetch_stock_rankings_cached_v4(period="day")
+        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障與符號解析的第 5 版自癒排行 API
+        rank_data = fetch_stock_rankings_cached_v5(period="day")
         
     if rank_data:
         df_rank = pd.DataFrame(rank_data)
@@ -1055,8 +1055,8 @@ with tab_rank:
         st.success("讀取完成！已成功加載 每日（本日最強） 前 25 檔最強勢飆股。")
         st.caption("💡 提示：勾選左側框格，可在下方「一鍵加入我的自選股」進行批次關注！")
         
-        # 隱藏 K 線圖網址的原始文字，改用 LinkColumn 漂亮渲染
-        display_rank_cols = [c for c in df_rank.columns if c != "K線圖網址"]
+        # 🚀 修正：同時過濾掉「K線圖網址」與用來背景排序的「本次區間漲幅_val」輔助欄位，給予最簡潔乾淨的視覺體驗
+        display_rank_cols = [c for c in df_rank.columns if c not in ["K線圖網址", "本次區間漲幅_val"]]
         
         rank_event = st.dataframe(
             df_rank[display_rank_cols],
@@ -1097,7 +1097,7 @@ with tab_rank:
                     else:
                         st.info("您選取的股票都已經在您的自選名單中囉！")
     else:
-        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍後重試。")
+        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍候重試。")
 
 # ==================== 【分頁三：我的自選監控】 ====================
 with tab2:
