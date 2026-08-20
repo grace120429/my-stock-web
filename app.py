@@ -186,7 +186,7 @@ if "margin_is_fallback" not in st.session_state:
 def create_yf_session():
     """
     改用 100% 安全、不當機的標準純 Python requests Session。
-    配備 Chrome 偽裝標頭，防止 Yahoo 429 阻擋！
+    配備 Chrome 偽裝裝頭，防止 Yahoo 429 阻擋！
     """
     import requests as std_requests
     session = std_requests.Session()
@@ -198,10 +198,10 @@ def create_yf_session():
     })
     return session
 
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V7 完美對齊刷新版) ====================
-# 💡 升級：再次升級快取函數至第 7 版，對接完美修正的 fetch_all_daily_prices_v6 行情計算
+# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V6 官方欄位修正版) ====================
+# 💡 升級：此處函數定義已完美同步修正為第 6 版
 @st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v7(period="day"):
+def fetch_stock_rankings_cached_v6(period="day"):
     """
     極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
     此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
@@ -219,7 +219,7 @@ def fetch_stock_rankings_cached_v7(period="day"):
     # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
     if period == "day":
         try:
-            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v6 當日大數據 API，解決屬性名稱對接失誤的問題！
+            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v6 當日大數據 API
             prices = data_fetcher.fetch_all_daily_prices_v6()
             if prices:
                 all_stocks = []
@@ -239,7 +239,7 @@ def fetch_stock_rankings_cached_v7(period="day"):
                 for idx, item in enumerate(all_stocks):
                     item["排行"] = idx + 1
                 if len(all_stocks) > 0:
-                    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股（包括鼎元）悉數進榜！
+                    return all_stocks[:50]
         except Exception as e_day:
             print(f"Daily OpenAPI calculation failed: {e_day}")
 
