@@ -161,6 +161,7 @@ def create_yf_session():
     return session
 
 # ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V7 完美對齊刷新版) ====================
+# 💡 升級：此處函數定義已完美同步修正為第 7 版，直接對應大數據 fetch_all_daily_prices_v3 函數
 @st.cache_data(ttl=1800)
 def fetch_stock_rankings_cached_v7(period="day"):
     """
@@ -325,7 +326,7 @@ def render_streamlit_calendar(year, month, events):
                 cell_style = "border: 1px solid #e6e9ef; height: 45px; text-align: center; vertical-align: middle; font-size: 14px;"
                 
                 if day_events:
-                    # 使用 HTML 實體 &#13; 實現 Tooltip 多行換行顯示
+                    # 使用 HTML 實體 &#13; 實現 Tooltip 多行裝行顯示
                     tooltip_text = f"除息預告 ({year}/{month:02d}/{day:02d})：&#13;" + "&#13;".join([f"{ev['code']} {ev['name']}: {ev['amount']}" for ev in day_events])
                     row_cells.append(
                         f"<td style='{cell_style} background-color: #ffcccc; color: #cc0000; font-weight: bold; cursor: pointer;' "
@@ -692,7 +693,7 @@ with tab1:
                                 continue
                             
                             is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
-                            if filter_box Glen and not is_box:
+                            if filter_box and not is_box:
                                 continue
                                 
                             if not is_code_etf:
@@ -701,7 +702,7 @@ with tab1:
                                     q_eps_series = get_eps_from_stmt(q_stmt)
                                     a_eps_series = get_eps_from_stmt(a_stmt)
                                     
-                                    # 🚀 修正語法空格錯誤
+                                    # 🚀 語法修正：將原先打錯連在一起的 emptyand 修正為正確帶空格的 empty and
                                     if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
@@ -1023,7 +1024,7 @@ with tab_rank:
                     else:
                         st.info("您選取的股票都已經在您的自選名單中囉！")
     else:
-        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍後重試。")
+        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍候重試。")
 
 # ==================== 【分頁三：我的自選監控】 ====================
 with tab2:
@@ -1606,7 +1607,7 @@ with tab4:
                     st.session_state.cal_year += 1
                 st.rerun()
                 
-        # 🚀 重要修復：調用補回後的日曆渲染函數
+        # 🚀 完美補回：呼叫直接定義在 app.py 頂端的行事曆 HTML 渲染器
         html_cal = render_streamlit_calendar(
             st.session_state.cal_year, 
             st.session_state.cal_month, 
@@ -1704,7 +1705,7 @@ with tab4:
                     "持股市值": f"{safe_int(market_val):,} 元"
                 })
         if pb_rows:
-            st.dataframe(pb_rows, use_container_width=True)
+            st.dataframe(pd.DataFrame(pb_rows), use_container_width=True)
             
             col_stat1, col_stat2, col_stat3 = st.columns(3)
             col_stat1.metric("總持股市值", f"{safe_int(total_market_value):,} 元")
