@@ -71,7 +71,7 @@ def load_announcement():
     """載入側邊欄公告"""
     if not os.path.exists(ANNOUNCEMENT_FILE):
         return {
-            "content": "歡迎造訪台股選股工具！",
+            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
             "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
         }
     try:
@@ -186,7 +186,7 @@ if "margin_is_fallback" not in st.session_state:
 def create_yf_session():
     """
     改用 100% 安全、不當機的標準純 Python requests Session。
-    配備 Chrome 偽裝裝頭，防止 Yahoo 429 阻擋！
+    配備 Chrome 偽裝標頭，防止 Yahoo 429 阻擋！
     """
     import requests as std_requests
     session = std_requests.Session()
@@ -199,7 +199,7 @@ def create_yf_session():
     return session
 
 # ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V7 完美對齊刷新版) ====================
-# 💡 升級：為徹底刷新 Streamlit 之前編譯失敗記錄的舊快取，此處將快取函數升級至第 7 版
+# 💡 升級：為徹底刷新 Streamlit 之前失敗記錄的 0.0 舊快取，此處將快取函數升級至第 7 版
 @st.cache_data(ttl=1800)
 def fetch_stock_rankings_cached_v7(period="day"):
     """
@@ -219,7 +219,7 @@ def fetch_stock_rankings_cached_v7(period="day"):
     # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
     if period == "day":
         try:
-            # 🚀 呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v3 當日大數據 API
+            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v3 當日大數據 API
             prices = data_fetcher.fetch_all_daily_prices_v3()
             if prices:
                 all_stocks = []
@@ -316,6 +316,85 @@ def fetch_stock_rankings_cached_v7(period="day"):
         item["排行"] = idx + 1
         
     return all_stocks[:50]
+
+# ==================== 留言區檔案讀寫輔助函數 ====================
+COMMENTS_FILE = "comments.json"
+
+def load_comments():
+    """載入留言"""
+    if not os.path.exists(COMMENTS_FILE):
+        return []
+    try:
+        with open(COMMENTS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_comments(comments):
+    """儲存留言"""
+    try:
+        with open(COMMENTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(comments, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"儲存留言失敗: {e}")
+
+# ==================== 側邊欄網站人氣統計與公告看板 ====================
+st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>網站數據統計</h3>", unsafe_allow_html=True)
+
+# 雲端永久人氣計數器 (使用 hitscounter.dev 提供永久累積與更新，網址經由 URL 編碼確保唯一性)
+visitor_badge_url = "https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fgrace120429%2Fmy-stock-web&label=Total%20Views&color=%23007bff"
+
+st.sidebar.markdown(
+    f"""
+    <div style='text-align: center; margin-bottom: 20px;'>
+        <img src='{visitor_badge_url}' alt='Views'/>
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
+
+st.sidebar.markdown(
+    """
+    <div style='text-align: center; color: gray; font-size: 11px;'>
+        提示：本計數器由雲端數據庫提供永久累計，每一次頁面載入皆會即時更新。
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# 側邊欄管理者公告看板
+st.sidebar.write("---")
+st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>📢 管理者公告</h3>", unsafe_allow_html=True)
+ann_data = load_announcement()
+st.sidebar.markdown(
+    f"""
+    <div style='background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);'>
+        <p style='color: #64748b; font-size: 11px; font-weight: 500; margin-bottom: 6px;'>更新時間：{ann_data.get('date', 'N/A')}</p>
+        <p style='color: #1e293b; font-size: 13px; white-space: pre-wrap; line-height: 1.5; margin-bottom: 0;'>{ann_data.get('content', '暫無公告')}</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# ==================== 頁首資訊 ====================
+st.title("台股三大法人飆股選股工具 by Kelly")
+
+# 載入即時台幣匯率與集保資料日期
+twd_str = data_fetcher.fetch_twd_data()
+st.info(f"{twd_str}")
+
+# 載入自訂主力券商與分點設定 (確保所有分頁與模組均能讀取)
+brokers_dict = storage.load_custom_brokers()
+
+# ==================== 🚀 建立六大分頁 (台股強勢漲幅榜插入為分頁二) ====================
+tab1, tab_rank, tab2, tab3, tab4, tab5 = st.tabs([
+    "三大法人選股大數據", 
+    "📈 台股強勢漲幅榜", 
+    "我的自選監控", 
+    "主力券商進出", 
+    "台灣熱門 ETF 配息專區",
+    "讀者交流留言區"
+])
 
 # ==================== 【分頁一：三大法人選股大數據】 ====================
 with tab1:
@@ -587,7 +666,7 @@ with tab1:
                                     q_eps_series = get_eps_from_stmt(q_stmt)
                                     a_eps_series = get_eps_from_stmt(a_stmt)
                                     
-                                    # 🚀 語法錯誤修正：將原先打錯連在一起的 emptyand 修正為正確帶空格的 empty and
+                                    # 🚀 語法修正：上一版本漏掉空格的 emptyand 已完美修正為正確的 empty and
                                     if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
@@ -858,7 +937,7 @@ with tab_rank:
     st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障、正則相容與全新 100% 同步的第 7 版自癒排行 API
+        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障與符號解析的第 7 版自癒排行 API，解決所有連線與遺漏問題！
         rank_data = fetch_stock_rankings_cached_v7(period="day")
         
     if rank_data:
@@ -909,7 +988,7 @@ with tab_rank:
                     else:
                         st.info("您選取的股票都已經在您的自選名單中囉！")
     else:
-        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍候重試。")
+        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍後重試。")
 
 # ==================== 【分頁三：我的自選監控】 ====================
 with tab2:
