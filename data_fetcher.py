@@ -576,7 +576,8 @@ def get_recent_data(days_count=3, progress_callback=None):
         attempts += 1
     return valid_dfs, valid_dates
 
-# ==================== 匯率抓取模組 ====================
+# ==================== 匯率抓取模組 (🚀 補上快取裝飾器，避免全域阻塞) ====================
+@st.cache_data(ttl=3600)  # 快取 1 小時，載入網頁時不需重覆連線
 def fetch_twd_data():
     twd_str = "💵 台幣匯率: 載入失敗"
     try:
@@ -595,7 +596,6 @@ def fetch_twd_data():
     except Exception:
         pass
     return twd_str
-
 # ==================== 集保大戶比例 CSV 串流解析 ====================
 def fetch_tdcc_data():
     url = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5"
