@@ -71,7 +71,7 @@ def load_announcement():
     """載入側邊欄公告"""
     if not os.path.exists(ANNOUNCEMENT_FILE):
         return {
-            "content": "歡迎造訪台股選股工具！",
+            "content": "歡迎造訪台股選股工具！\n每日精選標的將在此處即時更新，請進入後台設定內容。",
             "date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
         }
     try:
@@ -96,7 +96,7 @@ def fetch_stock_top_brokers_local(code, days=5):
     from bs4 import BeautifulSoup
     from data_fetcher import unsafe_session  # 沿用專案中的連線 Session 繞過限制
     
-    # 💡 升級：支援 15 天與大天數映射 [2]
+    # 💡 升級：支援 15 天與大天數映射
     days_map = {1: 1, 3: 3, 5: 5, 7: 5, 10: 10, 15: 15, 20: 20, 30: 20, 60: 20, 120: 20}
     d_param = days_map.get(days, 5)
     
@@ -198,13 +198,13 @@ def create_yf_session():
     })
     return session
 
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V5 官方欄位修正版) ====================
-# 💡 升級：為徹底刷新 Streamlit 之前失敗記錄的 0.0 舊快取，此處將快取函數升級至第 5 版
+# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V6 完美相容版) ====================
+# 💡 升級：為徹底刷新 Streamlit 舊快取，此處將快取函數升級至第 6 版
 @st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v5(period="day"):
+def fetch_stock_rankings_cached_v6(period="day"):
     """
     極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
-    此函數直接定義在 app.py 中，並具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
+    此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
     """
     import re
     from bs4 import BeautifulSoup
@@ -219,12 +219,11 @@ def fetch_stock_rankings_cached_v5(period="day"):
     # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
     if period == "day":
         try:
-            # 🚀 修正：呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v3 當日大數據 API，這能 100% 解析全台股 1800 檔個股漲跌！
+            # 🚀 呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v6 當日大數據 API
             prices = data_fetcher.fetch_all_daily_prices_v3()
             if prices:
                 all_stocks = []
                 for code, info in prices.items():
-                    # 過濾權證與特殊代碼，只保留 4 碼純股票
                     if len(code) == 4 and code.isdigit():
                         all_stocks.append({
                             "代號": code,
@@ -239,7 +238,7 @@ def fetch_stock_rankings_cached_v5(period="day"):
                 for idx, item in enumerate(all_stocks):
                     item["排行"] = idx + 1
                 if len(all_stocks) > 0:
-                    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股悉數進榜！
+                    return all_stocks[:50]
         except Exception as e_day:
             print(f"Daily OpenAPI calculation failed: {e_day}")
 
@@ -258,10 +257,7 @@ def fetch_stock_rankings_cached_v5(period="day"):
     for host in hosts:
         all_stocks = []
         try:
-            # 抓取上市排行 (zg_A_0)
             res_listed = session.get(f"{host}/z/zg/zg_A_0_{d_param}.djhtm", timeout=6)
-            
-            # 抓取上櫃排行 (zg_A_1 或 zg_A_3)
             res_otc = None
             for otc_idx in [1, 3]:
                 try:
@@ -272,7 +268,6 @@ def fetch_stock_rankings_cached_v5(period="day"):
                 except:
                     continue
             
-            # 解析數據
             for res in [res_listed, res_otc]:
                 if res and res.status_code == 200:
                     html = res.content.decode('big5', errors='ignore')
@@ -280,7 +275,6 @@ def fetch_stock_rankings_cached_v5(period="day"):
                     for tr in soup.find_all('tr'):
                         tr_str = str(tr)
                         if "GenLink2stk" in tr_str:
-                            # 🚀 關鍵正則表達式修正：相容單引號、雙引號、空格以及 AS/OT 前綴，完美精準抓取代碼
                             match = re.search(r"GenLink2stk\(\s*['\"](?:AS|OT)?(\w+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", tr_str)
                             if match:
                                 code = match.group(1)
@@ -288,8 +282,6 @@ def fetch_stock_rankings_cached_v5(period="day"):
                                 tds = tr.find_all('td')
                                 if len(tds) >= 5:
                                     close_price = tds[2].text.strip()
-                                    
-                                    # 🚀 關鍵欄位索引修正：
                                     if d_param in [5, 20] and len(tds) >= 8:
                                         change = tds[6].text.strip()
                                         pct_change_str = tds[7].text.strip()
@@ -312,22 +304,17 @@ def fetch_stock_rankings_cached_v5(period="day"):
                                         "本次區間漲幅": f"{pct_change_clean}%" if "%" not in pct_change_str else pct_change_str,
                                         "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
                                     })
-            
-            # 如果成功抓取到任一券商的數據，就直接跳出，不需再存取其他主機
             if len(all_stocks) > 5:
                 break
         except Exception as e:
             print(f"Host {host} failed: {e}")
             continue
             
-    # 合併後依據漲幅數值進行由大到小排序
     all_stocks.sort(key=lambda x: x["本次區間漲幅_val"], reverse=True)
-    
-    # 重新編排排行名次
     for idx, item in enumerate(all_stocks):
         item["排行"] = idx + 1
         
-    return all_stocks[:50] # 🚀 擴大回傳上限為前 50 名，保證當天所有 10% 漲停板的個股悉數進榜！
+    return all_stocks[:50]
 
 # ==================== 留言區檔案讀寫輔助函數 ====================
 COMMENTS_FILE = "comments.json"
@@ -1040,13 +1027,13 @@ with tab1:
         else:
             st.warning("查無符合篩選條件之個股。")
 
-# ==================== 📈 【分頁二：台股強勢漲幅榜】 ====================
+# ==================== 📈 【分頁二：台股強勢漲幅榜】(僅保留每日) ====================
 with tab_rank:
     st.subheader("🔥 台股強勢漲幅排行榜 (Top 25 大飆股)")
     st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障、正則相容的第 6 版自癒排行 API
+        # 🚀 固定呼叫每日排行，對接具有雙重保障與符號解析的第 6 版自癒排行 API
         rank_data = fetch_stock_rankings_cached_v6(period="day")
         
     if rank_data:
