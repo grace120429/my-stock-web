@@ -1268,6 +1268,7 @@ with tab2:
                 days_param_tab2 = 5 
                 
                 for idx in selected_rows_tab2:
+                    # 💡 修正原本的 len(df_res) -> 採用分頁二自有的 df_w，避免跨分頁狀態干擾造成當機 [1]
                     if idx >= len(df_w):  # 💡 防禦性安全機制：防止 Streamlit 狀態殘留導致當機 [1]
                         continue
                     row_data = df_w.iloc[idx]
