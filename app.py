@@ -199,12 +199,12 @@ def create_yf_session():
     return session
 
 # ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V4 官方欄位修正版) ====================
-# 💡 升級：為徹底刷新 Streamlit 之前失敗記錄的 0.0 舊快取，此處將快取函數升級至第 4 版
+# 💡 升級：為徹底刷新 Streamlit 舊快取，此處將快取函數升級至第 4 版
 @st.cache_data(ttl=1800)
 def fetch_stock_rankings_cached_v4(period="day"):
     """
-    極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
-    此函數直接定義在 app.py 中，並具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
+    極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個幅前 25 名。
+    此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
     """
     import re
     from bs4 import BeautifulSoup
@@ -290,8 +290,6 @@ def fetch_stock_rankings_cached_v4(period="day"):
                                     close_price = tds[2].text.strip()
                                     
                                     # 🚀 關鍵欄位索引修正：
-                                    # 在 5日 與 20日 排行的 Moneydj 表格中，本日漲跌與漲幅位在 td[3], td[4]，
-                                    # 而真正累計的 5日/20日 漲跌與漲幅則位在右方的 td[6], td[7]！ [1]
                                     if d_param in [5, 20] and len(tds) >= 8:
                                         change = tds[6].text.strip()
                                         pct_change_str = tds[7].text.strip()
@@ -315,7 +313,7 @@ def fetch_stock_rankings_cached_v4(period="day"):
                                         "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
                                     })
             
-            # 只要成功抓取到一組可用資料，即跳出輪替，不再請求其他主機
+            # 如果成功抓取到任一券商的數據，就直接跳出，不需再存取其他主機
             if len(all_stocks) > 5:
                 break
         except Exception as e:
@@ -777,7 +775,7 @@ with tab1:
                                     q_eps_series = get_eps_from_stmt(q_stmt)
                                     a_eps_series = get_eps_from_stmt(a_stmt)
                                     
-                                    if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
+                                    if q_eps_series is not None and not q_eps_series.emptyand a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
                                         q_str = get_quarter_str(q_date)
@@ -1042,35 +1040,19 @@ with tab1:
         else:
             st.warning("查無符合篩選條件之個股。")
 
-# ==================== 📈 【分頁二：台股強勢漲幅榜】 ====================
+# ==================== 📈 【分頁二：台股強勢漲幅榜】(僅保留每日) ====================
 with tab_rank:
     st.subheader("🔥 台股強勢漲幅排行榜 (Top 25 大飆股)")
     st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
     
-    # 建立多週期篩選選單
-    rank_period = st.radio(
-        "選擇漲幅統計週期：",
-        options=["每日（本日最強）", "每周（近 5 日最強）", "每月（近 20 日最強）"],
-        horizontal=True,
-        index=0
-    )
-    
-    # 對應爬取週期參數
-    period_key_map = {
-        "每日（本日最強）": "day",
-        "每周（近 5 日最強）": "week",
-        "每月（近 20 日最強）": "month"
-    }
-    selected_period_key = period_key_map[rank_period]
-    
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 呼叫直接定義在本檔案中的 V4 快取排行榜，徹底刷新舊快取，支援多引號相容正則與動態第 8 欄區間值提取
-        rank_data = fetch_stock_rankings_cached_v4(period=selected_period_key)
+        # 🚀 升級：固定呼叫每日排行，解決快取與爬蟲連線受阻問題
+        rank_data = fetch_stock_rankings_cached_v4(period="day")
         
     if rank_data:
         df_rank = pd.DataFrame(rank_data)
         
-        st.success(f"讀取完成！已成功加載 {rank_period} 前 {len(df_rank)} 檔最強勢飆股。")
+        st.success("讀取完成！已成功加載 每日（本日最強） 前 25 檔最強勢飆股。")
         st.caption("💡 提示：勾選左側框格，可在下方「一鍵加入我的自選股」進行批次關注！")
         
         # 隱藏 K 線圖網址的原始文字，改用 LinkColumn 漂亮渲染
@@ -1083,12 +1065,12 @@ with tab_rank:
                 "代號": st.column_config.TextColumn("代號"),
                 "收盤價": st.column_config.TextColumn("現價 / 收盤價"),
                 "本日漲跌": st.column_config.TextColumn("本日漲跌"),
-                "本次區間漲幅": st.column_config.TextColumn("漲幅 %", help="本日/近5日/近20日之區間累計漲跌幅"),
+                "本次區間漲幅": st.column_config.TextColumn("漲幅 %", help="本日之區間累計漲跌幅"),
             },
             use_container_width=True,
             on_select="rerun",
             selection_mode="multi-row",
-            key=f"df_rank_table_{selected_period_key}"
+            key="df_rank_table_day_only"
         )
         
         # 處理一鍵加入自選股
@@ -1098,7 +1080,7 @@ with tab_rank:
             st.write("")
             col_rank_btn, _ = st.columns([1, 4])
             with col_rank_btn:
-                if st.button(f"📥 一鍵加入我的自選股 ({len(selected_rank_codes)} 檔)", type="primary"):
+                if st.button("📥 一鍵加入我的自選股 (" + str(len(selected_rank_codes)) + " 檔)", type="primary"):
                     current_watchlist = get_local_watchlist()
                     added_cnt = 0
                     for code in selected_rank_codes:
@@ -1107,8 +1089,9 @@ with tab_rank:
                             added_cnt += 1
                     if added_cnt > 0:
                         save_local_watchlist(current_watchlist)
+                        # 清除自選股工作階段快取，強迫下次開啟自選監控時自動更新
                         st.session_state.watchlist_df_cache = None
-                        st.success(f"已成功將 {added_cnt} 檔強勢股加入您的自選監控名單！")
+                        st.success("已成功將 " + str(added_cnt) + " 檔強勢股加入您的自選監控名單！")
                         time.sleep(0.8)
                         st.rerun()
                     else:
