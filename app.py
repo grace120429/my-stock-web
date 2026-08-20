@@ -198,12 +198,13 @@ def create_yf_session():
     })
     return session
 
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V2 內嵌版) ====================
+# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V3 官方欄位修正版) ====================
+# 💡 升級：為徹底刷新 Streamlit 之前失敗記錄的 0.0 舊快取，此處將快取函數升級至第 3 版
 @st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v2(period="day"):
+def fetch_stock_rankings_cached_v3(period="day"):
     """
     極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
-    此函數直接定義在 app.py 中，並具備雙重自癒安全保障機制，保證盤中、盤後 100% 穩定呈現。
+    此函數直接定義在 app.py 中，並具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
     """
     import re
     from bs4 import BeautifulSoup
@@ -218,7 +219,8 @@ def fetch_stock_rankings_cached_v2(period="day"):
     # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
     if period == "day":
         try:
-            prices = data_fetcher.fetch_all_daily_prices()
+            # 🚀 修正：呼叫 ClosingPrice 欄位完美匹配的 v2 當日大數據 API
+            prices = data_fetcher.fetch_all_daily_prices_v2()
             if prices:
                 all_stocks = []
                 for code, info in prices.items():
@@ -227,7 +229,7 @@ def fetch_stock_rankings_cached_v2(period="day"):
                         all_stocks.append({
                             "代號": code,
                             "股票名稱": info.get("name") or data_fetcher.fetch_stock_name_fast(code),
-                            "收盤價": str(info["price"]),
+                            "收盤價": f"{info['price']:.1f}" if info['price'] > 0 else "0.0",
                             "本日漲跌": f"+{info['change']}" if info["change"] > 0 else str(info["change"]),
                             "本次區間漲幅_val": info["pct_change"],
                             "本次區間漲幅": f"{info['pct_change']:.2f}%",
@@ -1052,8 +1054,8 @@ with tab_rank:
     selected_period_key = period_key_map[rank_period]
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 呼叫直接定義在本檔案中的 V2 快取排行榜，解決 Attribute Error 問題
-        rank_data = fetch_stock_rankings_cached_v2(period=selected_period_key)
+        # 🚀 呼叫直接定義在本檔案中的 V3 快取排行榜，解決 Attribute Error 問題
+        rank_data = fetch_stock_rankings_cached_v3(period=selected_period_key)
         
     if rank_data:
         df_rank = pd.DataFrame(rank_data)
@@ -1102,7 +1104,7 @@ with tab_rank:
                     else:
                         st.info("您選取的股票都已經在您的自選名單中囉！")
     else:
-        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍後重試。")
+        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍候重試。")
 
 # ==================== 【分頁三：我的自選監控】 ====================
 with tab2:
