@@ -12,7 +12,7 @@ import helpers
 import storage
 import data_fetcher
 
-# 💡 新增：數值安全轉換防護，防止 NaN 或 None 造成整頁當機
+# 💡 數值安全轉換防護，防止 NaN 或 None 造成整頁當機
 def safe_int(val):
     try:
         if val is None or pd.isna(val):
@@ -169,6 +169,12 @@ if "yf_60m_cache" not in st.session_state:
 # 初始化篩選結果記憶體，避免勾選時表格消失
 if "tab1_results" not in st.session_state:
     st.session_state.tab1_results = None
+
+# 🚀 記憶防刷：初始化自選股緩存機制
+if "watchlist_df_cache" not in st.session_state:
+    st.session_state.watchlist_df_cache = None
+if "watchlist_last_codes" not in st.session_state:
+    st.session_state.watchlist_last_codes = []
 
 # 初始化融資回溯所需的狀態變數，避免 Rerun 時狀態丟失
 if "margin_date_used" not in st.session_state:
@@ -376,10 +382,10 @@ with tab1:
         col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 2.5, 2.5])
         
         with col_cfg1:
-            # 💡 升級：籌碼天數新增 15 天選項 [2]
+            # 💡 籌碼天數
             days_count = st.selectbox("籌碼區間天數：", [1, 3, 5, 7, 15, 30, 60, 120], index=0, key="tab1_days")
             
-            # 💡 新增：股本大小篩選選單
+            # 💡 股本大小篩選
             cap_filter_opt = st.selectbox(
                 "股本大小篩選：",
                 options=["不限股本", "中小型股 (股本 < 50億)", "小型股 (股本 < 20億)", "微型股 (股本 < 10億)", "中大型股 (股本 >= 50億)"],
@@ -426,15 +432,15 @@ with tab1:
             filter_box = "前期箱型整理 (近5日)" in selected_techs
             filter_momentum = "強勢飆股 (近5日漲幅 > 10%)" in selected_techs
 
-    st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。若勾選多個分點取交集，下載時間可能會增加數秒。")
+    st.caption("💡 貼心提醒：當日最新「融資信用交易數據」需等待證交所於每日晚間 **21:00 ~ 22:00** 結算，建議每日 **22:00 後** 進行篩選以獲取當日最即時數據。")
     if st.button("開始一鍵篩選股票", type="primary", key="btn_run_tab1"):
         with st.spinner("正在進行大數據分析，請稍候..."):
-            dfs, t86_dates = data_fetcher.get_recent_data(days_count=days_count)
+            # 🚀 升級：使用快取版的籌碼抓取，大幅降低 API 重複查詢率
+            dfs, t86_dates = data_fetcher.get_recent_data_cached(days_count=days_count)
             if not dfs:
                 st.error("無法自證交所取得資料。")
                 st.session_state.tab1_results = None
             else:
-                # 💡 基礎縮排一律維持 16 個空格，徹底對齊 else [1]
                 raw_data = pd.concat(dfs, ignore_index=True)
                 
                 tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
@@ -443,7 +449,7 @@ with tab1:
                 else:
                     tdcc_ratios, tdcc_changes = {}, {}
                 
-                # 💡 背景獲取融資數據（自動往前回溯的自癒機制）
+                # 🚀 升級：使用快取版融資餘額
                 margin_data = {}
                 margin_date_used = ""
                 st.session_state.margin_is_fallback = False
@@ -451,33 +457,32 @@ with tab1:
                 sorted_dates = sorted(t86_dates, reverse=True) if t86_dates else []
                 
                 for d_str in sorted_dates:
-                    temp_margin = data_fetcher.fetch_all_margin(d_str)
+                    temp_margin = data_fetcher.fetch_all_margin_cached(d_str)
                     if temp_margin:
                         margin_data = temp_margin
                         margin_date_used = d_str
                         if d_str != sorted_dates[0]:
                             st.session_state.margin_is_fallback = True
                         break
-                    time.sleep(0.2)
+                    time.sleep(0.1)
                 
                 if not margin_date_used and sorted_dates:
                     margin_date_used = sorted_dates[0]
                 
                 st.session_state.margin_date_used = margin_date_used
                 
-                revenue_data = data_fetcher.fetch_monthly_revenue()
-                
-                # 💡 獲取全市場最新股本數據
+                # 🚀 升級：使用快取版營收數據
+                revenue_data = data_fetcher.fetch_monthly_revenue_cached()
                 capital_data = data_fetcher.fetch_stock_capitals()
                 
                 multi_broker_data = {}
                 if b_active and selected_broker_names:
-                    # 💡 升級：對齊天數參數 [2]
                     days_param = 5 if days_count <= 7 else (15 if days_count == 15 else 20)
                     for b_name in selected_broker_names:
                         broker_id = brokers_dict.get(b_name)
                         if broker_id:
-                            broker_results = data_fetcher.fetch_broker_net_buys(broker_id, days_param)
+                            # 🚀 升級：使用快取版券商分點買超
+                            broker_results = data_fetcher.fetch_broker_net_buys_cached(broker_id, days_param)
                             multi_broker_data[b_name] = {
                                 code: item for code, item in broker_results.items() if item["diff"] > 0
                             }
@@ -584,15 +589,14 @@ with tab1:
                         top_candidates = filtered_summary.sort_values(by='排序得分', ascending=False).head(50)
                     
                     final_rows = []
-                    yf_session = create_yf_session()
-                    yf_fail_count = 0  # 💡 新增：追蹤 Yahoo API 連線失敗次數
+                    yf_fail_count = 0
                     
                     for _, row_item in top_candidates.iterrows():
                         code = row_item['證券代號']
                         name = row_item['證券名稱']
                         ticker = f"{code}.TW"
                         
-                        # 💡 股本大小過濾
+                        # 股本大小過濾
                         stock_cap = capital_data.get(code, 0.0)
                         if cap_filter_opt == "中小型股 (股本 < 50億)" and stock_cap >= 50.0:
                             continue
@@ -618,7 +622,7 @@ with tab1:
                         try:
                             time.sleep(0.15)
                             
-                            # 💡 升級：雙後綴自癒機制，優先嘗試 .TW，失敗自動嘗試 .TWO [1]
+                            # 🚀 升級：使用 K線快取抓取
                             try:
                                 if ticker in st.session_state.yf_cache:
                                     hist = st.session_state.yf_cache[ticker]
@@ -638,22 +642,18 @@ with tab1:
                             if hist.empty or len(hist) < 20:
                                 continue
                             
-                            # 💡 箱型整理檢查（排除當日收盤，檢測前 5 日是否為整理區間）
+                            # 箱型整理檢查
                             is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
                             if filter_box and not is_box:
                                 continue
                                 
                             if not is_code_etf:
                                 try:
-                                    stock = yf.Ticker(ticker, session=yf_session)
-                                    try:
-                                        q_stmt = stock.quarterly_income_stmt
-                                        a_stmt = stock.income_stmt
-                                    except:
-                                        q_stmt = stock.quarterly_financials
-                                        a_stmt = stock.financials
+                                    # 🚀 升級：使用最新快取版個股財報財務數據，拒絕重複下載
+                                    q_stmt, a_stmt = data_fetcher.fetch_stock_financials_cached(ticker)
                                     q_eps_series = get_eps_from_stmt(q_stmt)
                                     a_eps_series = get_eps_from_stmt(a_stmt)
+                                    
                                     if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
@@ -701,20 +701,17 @@ with tab1:
                             latest = hist.iloc[-1]
                             
                             price = latest['Close']
-                            # 💡 飆股漲幅計算：計算前第 5 個交易日到今天的累積漲幅
                             pct_change_5d = 0.0
                             if len(hist) >= 6:
                                 price_5d_ago = hist['Close'].iloc[-6]
                                 if price_5d_ago > 0:
                                     pct_change_5d = ((price - price_5d_ago) / price_5d_ago) * 100
                             
-                            # 強勢飆股定義：近 5 日累積漲幅大於 10% 且 均線呈多頭排列（站穩5日與20日線之上）
                             is_momentum_stock = (pct_change_5d > 10.0) and (price > latest['MA5']) and (latest['MA5'] > latest['MA20'])
                             
                             if filter_momentum and not is_momentum_stock:
                                 continue
                                 
-                            # 💡 原有的安全防禦：如果收盤價為無效值 (NaN) 則跳過
                             if pd.isna(price) or price <= 0:
                                 continue
                     
@@ -730,7 +727,6 @@ with tab1:
                             is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
                             ma_status = "均線向上" if is_bullish else "整理/向下"
                             
-                            # 💡 修正打字字元與邏輯錯誤 [1]
                             if filter_ma and not is_bullish:
                                 continue
                                 
@@ -770,7 +766,6 @@ with tab1:
                             prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else price
                             pct_change = ((price - prev_price) / prev_price) * 100
                             
-                            # 💡 核心優化：計算選取分點的預估張數與金額
                             broker_details_list = []
                             if b_active and selected_broker_names:
                                 for b_name in selected_broker_names:
@@ -787,7 +782,7 @@ with tab1:
                                 "代號": code,
                                 "股票名稱": name,
                                 "收盤價": round(price, 1),
-                                "股本(億)": stock_cap if stock_cap > 0 else None,  # 💡 整合股本欄位
+                                "股本(億)": stock_cap if stock_cap > 0 else None,
                                 "漲跌幅(%)": round(pct_change, 2),
                                 "最新單季EPS": latest_q_eps_val,
                                 "去年年度EPS": latest_a_eps_val,
@@ -795,12 +790,12 @@ with tab1:
                                 "外資金額(萬)": round(row_item['外資_張'] * price / 10, 1),
                                 "投信金額(萬)": round(row_item['投信_張'] * price / 10, 1),
                                 "自營金額(萬)": round(row_item['自營_張'] * price / 10, 1),
-                                "分點買超明細": broker_details_str,  # 隱藏此列，改由下方動態指標卡呈現
+                                "分點買超明細": broker_details_str,
                                 "融資餘額(張)": int(margin_data.get(code, {}).get("today", 0.0)),
                                 "融資變動(張)": int(summary.loc[summary['證券代號'] == code, '融資_張'].values[0]),
                                 "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
                                 "均線狀態": ma_status_display,
-                                "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",  # 新增箱型特徵欄位
+                                "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",
                                 "日K_MACD": macd_daily_status,
                                 "60m_MACD": macd_60m_status,
                                 "短期支壓(1M)": sr_1m,
@@ -815,9 +810,8 @@ with tab1:
                     st.session_state.tab1_results = final_rows
                 else:
                     st.session_state.tab1_results = []
-                    # 💡 自動診斷：如果是因為外部 Yahoo 數據庫 429 阻擋，給予使用者最友善的明確警示 [1]
                     if yf_fail_count > 0:
-                        st.warning("⚠️ 偵測到 Yahoo Finance 數據伺服器目前對雲端伺服器進行了臨時頻率限制 (Error 429 - 請求過於頻繁)，導致所有候選股歷史 K 線下載失敗。建議您直接再次點擊上方「開始一鍵篩選股票」按鈕重試，或稍等 1-2 分鐘再試。")
+                        st.warning("⚠️ 偵測到 Yahoo Finance 數據伺服器連線受限。請稍等 1-2 分鐘重試。")
                     else:
                         st.warning("無符合當前篩選與過濾條件之個股，請放寬條件再試。")
 
@@ -834,13 +828,12 @@ with tab1:
                     formatted_margin_date = d_str
                 
                 if st.session_state.margin_is_fallback:
-                    st.info(f"💡 提示：最新一日融資數據尚未發布或讀取失敗，已為您自動回溯採用 **{formatted_margin_date}** 之融資明細。")
+                    st.info(f"💡 提示：最新一日融資數據尚未發布，已自動採用 **{formatted_margin_date}** 之融資明細。")
                 else:
                     st.caption(f"📊 融資數據基準日：{formatted_margin_date}")
             
-            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。 (提示：勾選下方表格最左側的股票，可在下方即時查看該股的『主力分點進出卡片與全台排行』！)")
+            st.success(f"篩選完成！共尋獲 {len(df_res)} 檔個股。")
             
-            # 💡 隱藏大數據中的「分點買超明細」文字，不佔用儲存格空間
             visible_cols = [c for c in df_res.columns if c != "分點買超明細"]
             
             event = st.dataframe(
@@ -857,11 +850,10 @@ with tab1:
             # 偵測並讀取使用者選取的行數
             selected_rows = event.selection.rows
             if selected_rows:
-                # 💡 核心升級一：動態呈現自選分點買超明細儀表板 (Metrics)
                 st.write("---")
                 st.markdown("### 🎯 已選個股 - 主力分點進出特寫")
                 for idx in selected_rows:
-                    if idx >= len(df_res):  # 💡 防禦性安全機制：防止 Streamlit 狀態殘留導致當機 [1]
+                    if idx >= len(df_res):
                         continue
                     row_data = df_res.iloc[idx]
                     code = row_data["代號"]
@@ -870,7 +862,6 @@ with tab1:
                     
                     with st.container(border=True):
                         st.markdown(f"**📍 {code} {name}**")
-                        
                         st.markdown("**📌 我的自選主力進出：**")
                         if details and details != "無":
                             detail_items = details.split(" | ")
@@ -884,7 +875,6 @@ with tab1:
                         else:
                             st.caption("自選分點在此股無符合之買超紀錄。")
                         
-                        # 💡 核心升級二：不限自選！動態調閱全台灣所有分點 Top 10 排行表
                         st.write("")
                         st.markdown("**🔥 全台所有分點 - 買賣超前 10 名排行 (不設限自選)：**")
                         with st.spinner(f"正在向系統調閱 {code} 的全台主力排行..."):
@@ -907,7 +897,7 @@ with tab1:
                                 else:
                                     st.caption("無賣超排行資料")
                         else:
-                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
+                            st.error("無法自交易所獲取全台主力排行，請稍候重試。")
                 
                 selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
                 st.write("")
@@ -920,6 +910,8 @@ with tab1:
                             added_count += 1
                     if added_count > 0:
                         save_local_watchlist(current_watchlist)
+                        # 🚀 記憶防刷：自選名單變動時清除快取，強制下次重新載入最新資料
+                        st.session_state.watchlist_df_cache = None
                         st.success(f"已成功加入 {added_count} 檔股票至您的專屬自選股！")
                         time.sleep(0.8)
                         st.rerun()
@@ -955,6 +947,8 @@ with tab2:
                         if new_watchlist_code not in watchlist:
                             watchlist.append(new_watchlist_code)
                             save_local_watchlist(watchlist)
+                            # 🚀 記憶防刷：自選名單變動時清除快取
+                            st.session_state.watchlist_df_cache = None
                             st.success(f"已新增 {new_watchlist_code}！")
                             time.sleep(0.5)
                             st.rerun()
@@ -964,13 +958,11 @@ with tab2:
         with col_rem:
             st.markdown("**🗑️ 批次勾選移除自選股**")
             if watchlist:
-                # 💡 升級：展開式勾選清單 (Checkbox Grid) 批次刪除 [1]
                 with st.expander("👉 展開自選股勾選清單 (可多選一鍵刪除)", expanded=False):
                     cols = st.columns(4)
                     to_remove = []
                     
                     for i, code in enumerate(watchlist):
-                        # 自動取得中文股票名稱
                         name = data_fetcher.fetch_stock_name_fast(code)
                         label = f"{code} {name}" if name != "未知" else f"{code}"
                         
@@ -978,7 +970,6 @@ with tab2:
                             if st.checkbox(label, key=f"del_chk_{code}"):
                                 to_remove.append(code)
                     
-                    # 💡 永遠顯示移除按鈕，防止隱藏造成使用者困惑
                     st.write("")
                     if st.button(f"🗑️ 確認移除已勾選的股票 ({len(to_remove)} 檔)", type="secondary", use_container_width=True):
                         if not to_remove:
@@ -986,6 +977,8 @@ with tab2:
                         else:
                             updated_watchlist = [c for c in watchlist if c not in to_remove]
                             save_local_watchlist(updated_watchlist)
+                            # 🚀 記憶防刷：自選名單變動時清除快取
+                            st.session_state.watchlist_df_cache = None
                             st.success(f"已成功從您的自選清單移除：{', '.join(to_remove)}！")
                             time.sleep(0.5)
                             st.rerun()
@@ -1001,6 +994,8 @@ with tab2:
         if st.button("🔄 重新整理自選數據", use_container_width=True):
             st.session_state.yf_cache.clear()
             st.session_state.yf_60m_cache.clear()
+            # 🚀 記憶防刷：手動重整時徹底清除 Session 快取，強制重新向伺服器調閱新資料
+            st.session_state.watchlist_df_cache = None
             st.success("快取已清除，正在重新抓取...")
             time.sleep(0.5)
             st.rerun()
@@ -1011,242 +1006,239 @@ with tab2:
             st.warning("目前監控清單為空。")
             
     if watchlist:
-        w_rows = []
-        errors_log_tab2 = []
-        yf_session_tab2 = create_yf_session()
+        # 🚀 記憶防刷的核心邏輯：檢查股票代碼列表是否有改變、或緩存是否為空
+        watchlist_changed = (watchlist != st.session_state.watchlist_last_codes)
         
-        with st.spinner("正在分析自選股籌碼、財報與技術指標，請稍候..."):
-            # 1. 抓取近 5 日三大法人合併資料以計算自選股籌碼
-            chip_dfs, t86_dates = data_fetcher.get_recent_data(days_count=5)
-            summary_chip = pd.DataFrame()
-            margin_data = {}
+        if st.session_state.watchlist_df_cache is None or watchlist_changed:
+            w_rows = []
+            errors_log_tab2 = []
+            yf_session_tab2 = create_yf_session()
             
-            if chip_dfs:
-                chip_raw = pd.concat(chip_dfs, ignore_index=True)
-                col_foreign, col_trust, col_dealer = None, None, None
-                for c in chip_raw.columns:
-                    if "外陸資買賣超股數(不含外資自營商)" == c: col_foreign = c
-                    elif "投信買賣超股數" == c: col_trust = c
-                    elif "自營商買賣超股數" == c: col_dealer = c
-                if not col_foreign:
+            with st.spinner("正在分析自選股籌碼、財報與技術指標，請稍候..."):
+                # 🚀 升級：使用快取版籌碼抓取，避開 10 秒 API 延遲
+                chip_dfs, t86_dates = data_fetcher.get_recent_data_cached(days_count=5)
+                summary_chip = pd.DataFrame()
+                margin_data = {}
+                
+                if chip_dfs:
+                    chip_raw = pd.concat(chip_dfs, ignore_index=True)
+                    col_foreign, col_trust, col_dealer = None, None, None
                     for c in chip_raw.columns:
-                        if "外陸資買賣超股數" in c or "外資買賣超股數" in c:
-                            col_foreign = c
-                            break
-                if not col_trust:
-                    for c in chip_raw.columns:
-                        if "投信買賣超" in c:
-                            col_trust = c
-                            break
-                if not col_dealer:
-                    for c in chip_raw.columns:
-                        if "自營商買賣超股數" in c and "自行買賣" not in c and "避險" not in c:
-                            col_dealer = c
-                            break
-                
-                def to_num(val):
-                    try: return float(str(val).replace(',', ''))
-                    except: return 0.0
-                
-                if col_foreign: chip_raw[col_foreign] = chip_raw[col_foreign].apply(to_num)
-                if col_trust: chip_raw[col_trust] = chip_raw[col_trust].apply(to_num)
-                if col_dealer: chip_raw[col_dealer] = chip_raw[col_dealer].apply(to_num)
-                
-                summary_chip = chip_raw.groupby(['證券代號']).agg({
-                    col_foreign: 'sum' if col_foreign else 'max',
-                    col_trust: 'sum' if col_trust else 'max',
-                    col_dealer: 'sum' if col_dealer else 'max'
-                }).reset_index()
-                
-                summary_chip['外資_張'] = summary_chip[col_foreign] / 1000 if col_foreign else 0
-                summary_chip['投信_張'] = summary_chip[col_trust] / 1000 if col_trust else 0
-                summary_chip['自營_張'] = summary_chip[col_dealer] / 1000 if col_dealer else 0
-
-            # 2. 獲取當日信用交易數據
-            if t86_dates:
-                sorted_dates = sorted(t86_dates, reverse=True)
-                for d_str in sorted_dates:
-                    temp_margin = data_fetcher.fetch_all_margin(d_str)
-                    if temp_margin:
-                        margin_data = temp_margin
-                        break
-                    time.sleep(0.1)
-
-            revenue_data = data_fetcher.fetch_monthly_revenue()
-            
-            # 💡 獲取全市場最新股本數據
-            capital_data = data_fetcher.fetch_stock_capitals()
-            
-            tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
-            tdcc_ratios, tdcc_changes = {}, {}
-            if tdcc_raw and tdcc_date:
-                tdcc_ratios, tdcc_changes, _ = storage.save_and_get_tdcc_change(tdcc_raw, tdcc_date)
-                
-            for code in watchlist:
-                try:
-                    time.sleep(0.15)
-                    # 優先嘗試 .TW，失敗時再嘗試 .TWO（上櫃）
-                    ticker = f"{code}.TW"
-                    name = data_fetcher.fetch_stock_name_fast(code)
+                        if "外陸資買賣超股數(不含外資自營商)" == c: col_foreign = c
+                        elif "投信買賣超股數" == c: col_trust = c
+                        elif "自營商買賣超股數" == c: col_dealer = c
+                    if not col_foreign:
+                        for c in chip_raw.columns:
+                            if "外陸資買賣超股數" in c or "外資買賣超股數" in c:
+                                col_foreign = c
+                                break
+                    if not col_trust:
+                        for c in chip_raw.columns:
+                            if "投信買賣超" in c:
+                                col_trust = c
+                                break
+                    if not col_dealer:
+                        for c in chip_raw.columns:
+                            if "自營商買賣超股數" in c and "自行買賣" not in c and "避險" not in c:
+                                col_dealer = c
+                                break
                     
-                    is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
-                    latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
-                    latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
+                    def to_num(val):
+                        try: return float(str(val).replace(',', ''))
+                        except: return 0.0
                     
+                    if col_foreign: chip_raw[col_foreign] = chip_raw[col_foreign].apply(to_num)
+                    if col_trust: chip_raw[col_trust] = chip_raw[col_trust].apply(to_num)
+                    if col_dealer: chip_raw[col_dealer] = chip_raw[col_dealer].apply(to_num)
+                    
+                    summary_chip = chip_raw.groupby(['證券代號']).agg({
+                        col_foreign: 'sum' if col_foreign else 'max',
+                        col_trust: 'sum' if col_trust else 'max',
+                        col_dealer: 'sum' if col_dealer else 'max'
+                    }).reset_index()
+                    
+                    summary_chip['外資_張'] = summary_chip[col_foreign] / 1000 if col_foreign else 0
+                    summary_chip['投信_張'] = summary_chip[col_trust] / 1000 if col_trust else 0
+                    summary_chip['自營_張'] = summary_chip[col_dealer] / 1000 if col_dealer else 0
+
+                # 🚀 升級：使用快取版融資數據
+                if t86_dates:
+                    sorted_dates = sorted(t86_dates, reverse=True)
+                    for d_str in sorted_dates:
+                        temp_margin = data_fetcher.fetch_all_margin_cached(d_str)
+                        if temp_margin:
+                            margin_data = temp_margin
+                            break
+                        time.sleep(0.1)
+
+                revenue_data = data_fetcher.fetch_monthly_revenue_cached()
+                capital_data = data_fetcher.fetch_stock_capitals()
+                
+                tdcc_raw, tdcc_date = data_fetcher.fetch_tdcc_data()
+                tdcc_ratios, tdcc_changes = {}, {}
+                if tdcc_raw and tdcc_date:
+                    tdcc_ratios, tdcc_changes, _ = storage.save_and_get_tdcc_change(tdcc_raw, tdcc_date)
+                    
+                for code in watchlist:
                     try:
-                        hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
-                    except Exception:
-                        ticker = f"{code}.TWO"
-                        hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                        time.sleep(0.15)
+                        ticker = f"{code}.TW"
+                        name = data_fetcher.fetch_stock_name_fast(code)
                         
-                    if hist.empty or len(hist) < 20:
-                        errors_log_tab2.append(f"{code}: 歷史K線數據不足")
-                        continue
+                        is_code_etf_tab2 = (len(code) >= 5) or (len(code) == 4 and code.startswith("00"))
+                        latest_q_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
+                        latest_a_eps_val_tab2 = "ETF無EPS" if is_code_etf_tab2 else "載入中..."
                         
-                    # 分析個股最新財報
-                    if not is_code_etf_tab2:
                         try:
-                            stock = yf.Ticker(ticker, session=yf_session_tab2)
+                            hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                        except Exception:
+                            ticker = f"{code}.TWO"
+                            hist = data_fetcher.fetch_historical_data_cached(ticker, period="6mo")
+                            
+                        if hist.empty or len(hist) < 20:
+                            errors_log_tab2.append(f"{code}: 歷史K線數據不足")
+                            continue
+                            
+                        # 分析個股最新財報
+                        if not is_code_etf_tab2:
                             try:
-                                q_stmt = stock.quarterly_income_stmt
-                                a_stmt = stock.income_stmt
-                            except:
-                                q_stmt = stock.quarterly_financials
-                                a_stmt = stock.financials
-                            q_eps_series = get_eps_from_stmt(q_stmt)
-                            a_eps_series = get_eps_from_stmt(a_stmt)
-                            if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
-                                latest_q_eps = q_eps_series.iloc[0]
-                                q_date = q_eps_series.index[0]
-                                q_str = get_quarter_str(q_date)
-                                
-                                target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
-                                a_eps_val = None
-                                a_eps_year = None
-                                for idx_date, val in a_eps_series.items():
-                                    try:
-                                        dt = pd.to_datetime(idx_date)
-                                        if dt.year == target_year:
-                                            a_eps_val = val
-                                            a_eps_year = target_year
-                                            break
-                                    except:
-                                        pass
-                                if a_eps_val is None:
-                                    try:
-                                        first_date = a_eps_series.index[0]
-                                        dt = pd.to_datetime(first_date)
-                                        a_eps_val = a_eps_series.iloc[0]
-                                        a_eps_year = dt.year
-                                    except:
-                                        pass
-                                
-                                if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
-                                    latest_q_eps_val_tab2 = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
-                                    latest_a_eps_val_tab2 = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
+                                # 🚀 升級：使用最新快取版個股財報財務數據，避免每次載入都在下載財報
+                                q_stmt, a_stmt = data_fetcher.fetch_stock_financials_cached(ticker)
+                                q_eps_series = get_eps_from_stmt(q_stmt)
+                                a_eps_series = get_eps_from_stmt(a_stmt)
+                                if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
+                                    latest_q_eps = q_eps_series.iloc[0]
+                                    q_date = q_eps_series.index[0]
+                                    q_str = get_quarter_str(q_date)
+                                    
+                                    target_year = datetime.now(timezone(timedelta(hours=8))).year - 1
+                                    a_eps_val = None
+                                    a_eps_year = None
+                                    for idx_date, val in a_eps_series.items():
+                                        try:
+                                            dt = pd.to_datetime(idx_date)
+                                            if dt.year == target_year:
+                                                a_eps_val = val
+                                                a_eps_year = target_year
+                                                break
+                                        except:
+                                            pass
+                                    if a_eps_val is None:
+                                        try:
+                                            first_date = a_eps_series.index[0]
+                                            dt = pd.to_datetime(first_date)
+                                            a_eps_val = a_eps_series.iloc[0]
+                                            a_eps_year = dt.year
+                                        except:
+                                            pass
+                                    
+                                    if pd.notna(latest_q_eps) and a_eps_val is not None and pd.notna(a_eps_val):
+                                        latest_q_eps_val_tab2 = f"({q_str}) {round(latest_q_eps, 2)} 元" if q_str else f"{round(latest_q_eps, 2)} 元"
+                                        latest_a_eps_val_tab2 = f"({a_eps_year}年) {round(a_eps_val, 2)} 元"
+                                    else:
+                                        latest_q_eps_val_tab2 = "N/A"
+                                        latest_a_eps_val_tab2 = "N/A"
                                 else:
                                     latest_q_eps_val_tab2 = "N/A"
                                     latest_a_eps_val_tab2 = "N/A"
-                            else:
+                            except:
                                 latest_q_eps_val_tab2 = "N/A"
                                 latest_a_eps_val_tab2 = "N/A"
-                        except:
-                            latest_q_eps_val_tab2 = "N/A"
-                            latest_a_eps_val_tab2 = "N/A"
-                            
-                    price = hist['Close'].iloc[-1]
-                    prev_price = hist['Close'].iloc[-2]
-                    pct_change = ((price - prev_price) / prev_price) * 100
-                    
-                    # 計算均線與箱型整理指標
-                    is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
-                    hist['MA5'] = hist['Close'].rolling(5).mean()
-                    hist['MA20'] = hist['Close'].rolling(20).mean()
-                    latest = hist.iloc[-1]
-                    ma5 = latest['MA5']
-                    ma20 = latest['MA20']
-                    
-                    is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
-                    ma_status = "均線向上" if is_bullish else "整理/向下"
-                    
-                    latest_vol = hist['Volume'].iloc[-1]
-                    prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
-                    vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
-                    vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
-                    ma_status_display = f"{ma_status} ({vol_status_str})"
+                                
+                        price = hist['Close'].iloc[-1]
+                        prev_price = hist['Close'].iloc[-2]
+                        pct_change = ((price - prev_price) / prev_price) * 100
+                        
+                        is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
+                        hist['MA5'] = hist['Close'].rolling(5).mean()
+                        hist['MA20'] = hist['Close'].rolling(20).mean()
+                        latest = hist.iloc[-1]
+                        ma5 = latest['MA5']
+                        ma20 = latest['MA20']
+                        
+                        is_bullish = (price > ma5) and (price > ma20) and (ma5 > ma20)
+                        ma_status = "均線向上" if is_bullish else "整理/向下"
+                        
+                        latest_vol = hist['Volume'].iloc[-1]
+                        prev_20d_avg_vol = hist['Volume'].iloc[-21:-1].mean()
+                        vol_ratio = latest_vol / prev_20d_avg_vol if prev_20d_avg_vol > 0 else 0.0
+                        vol_status_str = f"量增 {vol_ratio:.1f}x" if vol_ratio >= 1.0 else f"量縮 {vol_ratio:.1f}x"
+                        ma_status_display = f"{ma_status} ({vol_status_str})"
 
-                    # 計算雙週期 MACD
-                    latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
-                    raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
-                    
-                    if latest_osc_daily is not None and latest_osc_daily <= 0:
-                        macd_daily_status = f"🟢 {raw_macd_daily}"
-                    else:
-                        macd_daily_status = f"🔴 {raw_macd_daily}"
-                    
-                    try:
-                        stock_60m = yf.Ticker(ticker, session=yf_session_tab2)
-                        hist_60m = stock_60m.history(interval="60m", period="1mo")
-                        latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
-                        raw_macd_60m = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                        latest_osc_daily, prev_osc_daily = helpers.calculate_macd(hist['Close'])
+                        raw_macd_daily = helpers.get_macd_status_str(latest_osc_daily, prev_osc_daily).replace("🟢 ", "").replace("🔴 ", "")
                         
-                        if latest_osc_60m is not None and latest_osc_60m <= 0:
-                            macd_60m_status = f"🟢 {raw_macd_60m}"
+                        if latest_osc_daily is not None and latest_osc_daily <= 0:
+                            macd_daily_status = f"🟢 {raw_macd_daily}"
                         else:
-                            macd_60m_status = f"🔴 {raw_macd_60m}"
-                    except:
-                        macd_60m_status = "N/A"
+                            macd_daily_status = f"🔴 {raw_macd_daily}"
                         
-                    sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
-                    
-                    # 擷取三大法人籌碼變動
-                    row_chip = summary_chip[summary_chip['證券代號'] == code] if not summary_chip.empty else pd.DataFrame()
-                    f_shares = row_chip['外資_張'].values[0] if not row_chip.empty else 0.0
-                    t_shares = row_chip['投信_張'].values[0] if not row_chip.empty else 0.0
-                    d_shares = row_chip['自營_張'].values[0] if not row_chip.empty else 0.0
-                    
-                    # 擷取融資信用額度
-                    margin_change = 0
-                    margin_today = 0
-                    if code in margin_data:
-                        margin_change = int(margin_data[code].get("change", 0.0))
-                        margin_today = int(margin_data[code].get("today", 0.0))
+                        try:
+                            stock_60m = yf.Ticker(ticker, session=yf_session_tab2)
+                            hist_60m = stock_60m.history(interval="60m", period="1mo")
+                            latest_osc_60m, prev_osc_60m = helpers.calculate_macd(hist_60m['Close'])
+                            raw_macd_60m = helpers.get_macd_status_str(latest_osc_60m, prev_osc_60m).replace("🟢 ", "").replace("🔴 ", "")
+                            
+                            if latest_osc_60m is not None and latest_osc_60m <= 0:
+                                macd_60m_status = f"🟢 {raw_macd_60m}"
+                            else:
+                                macd_60m_status = f"🔴 {raw_macd_60m}"
+                        except:
+                            macd_60m_status = "N/A"
+                            
+                        sr_1m, sr_6m = helpers.get_dynamic_sr(hist, price)
                         
-                    # 擷取公司股本資料
-                    stock_cap = capital_data.get(code, 0.0)
-                    
-                    w_rows.append({
-                        "代號": code,
-                        "股票名稱": name,
-                        "收盤價": round(price, 1),
-                        "股本(億)": stock_cap if stock_cap > 0 else None,  # 💡 整合股本欄位
-                        "漲跌幅(%)": round(pct_change, 2),
-                        "最新單季EPS": latest_q_eps_val_tab2,
-                        "去年年度EPS": latest_a_eps_val_tab2,
-                        "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),
-                        "外資金額(萬)": round(f_shares * price / 10, 1),
-                        "投信金額(萬)": round(t_shares * price / 10, 1),
-                        "自營金額(萬)": round(d_shares * price / 10, 1),
-                        "融資餘額(張)": margin_today,
-                        "融資變動(張)": margin_change,
-                        "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
-                        "均線狀態": ma_status_display,
-                        "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",
-                        "日K_MACD": macd_daily_status,
-                        "60m_MACD": macd_60m_status,
-                        "短期支壓(1M)": sr_1m,
-                        "中期支壓(6M)": sr_6m,
-                        "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
-                    })
-                except Exception as ex_tab2:
-                    errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
-                    continue                  
-        
-        # 💡 修正縮排：將 if-else 區塊向外移至與 spinner 對齊的 8 個空格
+                        row_chip = summary_chip[summary_chip['證券代號'] == code] if not summary_chip.empty else pd.DataFrame()
+                        f_shares = row_chip['外資_張'].values[0] if not row_chip.empty else 0.0
+                        t_shares = row_chip['投信_張'].values[0] if not row_chip.empty else 0.0
+                        d_shares = row_chip['自營_張'].values[0] if not row_chip.empty else 0.0
+                        
+                        margin_change = 0
+                        margin_today = 0
+                        if code in margin_data:
+                            margin_change = int(margin_data[code].get("change", 0.0))
+                            margin_today = int(margin_data[code].get("today", 0.0))
+                            
+                        stock_cap = capital_data.get(code, 0.0)
+                        
+                        w_rows.append({
+                            "代號": code,
+                            "股票名稱": name,
+                            "收盤價": round(price, 1),
+                            "股本(億)": stock_cap if stock_cap > 0 else None,
+                            "漲跌幅(%)": round(pct_change, 2),
+                            "最新單季EPS": latest_q_eps_val_tab2,
+                            "去年年度EPS": latest_a_eps_val_tab2,
+                            "月營收YoY/MoM": helpers.format_rev_growth(revenue_data.get(code)),
+                            "外資金額(萬)": round(f_shares * price / 10, 1),
+                            "投信金額(萬)": round(t_shares * price / 10, 1),
+                            "自營金額(萬)": round(d_shares * price / 10, 1),
+                            "融資餘額(張)": margin_today,
+                            "融資變動(張)": margin_change,
+                            "大戶比例": f"{round(tdcc_ratios.get(code, 0), 2)}%" if code in tdcc_ratios else "N/A",
+                            "均線狀態": ma_status_display,
+                            "前期箱型振幅": f"{box_amp}%" if is_box else f"{box_amp}% (未整理)",
+                            "日K_MACD": macd_daily_status,
+                            "60m_MACD": macd_60m_status,
+                            "短期支壓(1M)": sr_1m,
+                            "中期支壓(6M)": sr_6m,
+                            "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
+                        })
+                    except Exception as ex_tab2:
+                        errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
+                        continue                  
+            
+            # 🚀 寫入快取記憶：避免下一次點選操作重覆跑運算
+            st.session_state.watchlist_df_cache = w_rows
+            st.session_state.watchlist_last_codes = list(watchlist)
+        else:
+            # 🚀 快取生效：直接讀取 session 記憶體的結果，省去 15 秒分析流程！
+            w_rows = st.session_state.watchlist_df_cache
+            errors_log_tab2 = []
+
         if w_rows:
             df_w = pd.DataFrame(w_rows)
             
-            # 啟用與 Tab 1 相同的 HTML LinkColumn 配置
             event_tab2 = st.dataframe(
                 df_w,
                 column_config={
@@ -1268,8 +1260,7 @@ with tab2:
                 days_param_tab2 = 5 
                 
                 for idx in selected_rows_tab2:
-                    # 💡 修正原本的 len(df_res) -> 採用分頁二自有的 df_w，避免跨分頁狀態干擾造成當機 [1]
-                    if idx >= len(df_w):  # 💡 防禦性安全機制：防止 Streamlit 狀態殘留導致當機 [1]
+                    if idx >= len(df_w):
                         continue
                     row_data = df_w.iloc[idx]
                     code = row_data["代號"]
@@ -1279,15 +1270,16 @@ with tab2:
                     with st.container(border=True):
                         st.markdown(f"**📍 {code} {name}**")
                         
-                        # 1. 顯示我的自訂主力分點進出 (預估張數與金額)
+                        # 1. 顯示我的自訂主力分點進出
                         st.markdown("**📌 我的自選主力進出 (近 5 日)：**")
                         broker_details_list = []
                         if brokers_dict:
                             for b_name, b_id in brokers_dict.items():
-                                b_data = data_fetcher.fetch_broker_net_buys(b_id, days_param_tab2)
+                                # 🚀 升級：使用快取版主力券商特定天數交易資料抓取，避免頻繁發送外部 HTTP 請求
+                                b_data = data_fetcher.fetch_broker_net_buys_cached(b_id, days_param_tab2)
                                 if code in b_data:
                                     net_buy_wan = b_data[code]["diff"]
-                                    if net_buy_wan > 0:  # 只呈現買超的主力
+                                    if net_buy_wan > 0:
                                         est_shares = int(round((net_buy_wan * 10) / price_val)) if price_val > 0 else 0
                                         short_b_name = b_name.split(" ")[0]
                                         broker_details_list.append(f"{short_b_name}: {est_shares}張 ({net_buy_wan}萬)")
@@ -1326,11 +1318,11 @@ with tab2:
                                 else:
                                     st.caption("無賣超排行資料")
                         else:
-                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
+                            st.error("無法自交易所獲取全台主力排行，請稍候重試。")
         else:
             st.warning("自選股數據分析失敗，請查看下方診斷報告。")
             
-        if errors_log_tab2:
+        if 'errors_log_tab2' in locals() and errors_log_tab2:
             with st.expander("⚠️ 查看自選背景診斷報告"):
                 st.write(errors_log_tab2)
 
@@ -1384,7 +1376,8 @@ with tab3:
         b_id = brokers_dict.get(target_broker)
         
         with st.spinner("下載主力券商進出明細中..."):
-            broker_results = data_fetcher.fetch_broker_net_buys(b_id, days_param)
+            # 🚀 升級：使用快取版主力統計抓取
+            broker_results = data_fetcher.fetch_broker_net_buys_cached(b_id, days_param)
             if broker_results:
                 b_rows = []
                 for b_code, item in broker_results.items():
@@ -1604,7 +1597,6 @@ with tab4:
                 except:
                     pass
                     
-                # 💡 核心修正：將 C-style `&&` 運算子修改為 Python 標準的 `and` [1]
                 if ex_month == st.session_state.cal_month and ex_year == st.session_state.cal_year:
                     total_selected_month_dividend += total_gu * latest_div_value
                 
@@ -1614,8 +1606,8 @@ with tab4:
                     "總股數": f"{total_gu:,} 股",
                     "現價": f"{round(price, 1)} 元",
                     "預估單股年配息": f"{current_year_sum_val} 元",
-                    "預估年領股息": f"{safe_int(est_annual):,} 元",  # 💡 安全防護
-                    "持股市值": f"{safe_int(market_val):,} 元"      # 💡 安全防護                    
+                    "預估年領股息": f"{safe_int(est_annual):,} 元",
+                    "持股市值": f"{safe_int(market_val):,} 元"
                 })
         if pb_rows:
             st.dataframe(pd.DataFrame(pb_rows), use_container_width=True)
