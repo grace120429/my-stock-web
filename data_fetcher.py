@@ -57,7 +57,7 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
                                         
                                         dates.append(datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, tzinfo=timezone(timedelta(hours=8))))
                                         opens.append(p_open)
-                                        highs.append(p_high)
+                                        highs.append(p_open)
                                         lows.append(p_low)
                                         closes.append(p_close)
                                         volumes.append(p_vol)
@@ -96,7 +96,7 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
                                         
                                         dates.append(datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, tzinfo=timezone(timedelta(hours=8))))
                                         opens.append(p_open)
-                                        highs.append(p_high)
+                                        highs.append(p_open)
                                         lows.append(p_low)
                                         closes.append(p_close)
                                         volumes.append(p_vol)
@@ -1203,120 +1203,3 @@ def fetch_all_daily_prices_v3():
         print(f"Error fetching TPEx Day All: {e}")
         
     return price_dict
-
-# ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V6 完美相容版) ====================
-@st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached_v6(period="day"):
-    """
-    極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
-    此函數直接定義在 app.py 中，具備雙重自癒安全保障機制，保證盤中、盤後穩定呈現。
-    """
-    import re
-    from bs4 import BeautifulSoup
-    
-    days_map = {
-        "day": 1,
-        "week": 5,
-        "month": 20
-    }
-    d_param = days_map.get(period, 1)
-    
-    # 💡 終極自癒保障 1：如果是「每日排行」，優先使用 100% 穩定、絕不被擋的證交所/櫃買 OpenAPI 行情大數據自行計算！
-    if period == "day":
-        try:
-            # 🚀 呼叫 ClosingPrice 欄位與漲跌符號完美匹配的 v6 當日大數據 API
-            prices = data_fetcher.fetch_all_daily_prices_v3()
-            if prices:
-                all_stocks = []
-                for code, info in prices.items():
-                    if len(code) == 4 and code.isdigit():
-                        all_stocks.append({
-                            "代號": code,
-                            "股票名稱": info.get("name") or data_fetcher.fetch_stock_name_fast(code),
-                            "收盤價": f"{info['price']:.1f}" if info['price'] > 0 else "0.0",
-                            "本日漲跌": f"+{info['change']}" if info["change"] > 0 else str(info["change"]),
-                            "本次區間漲幅_val": info["pct_change"],
-                            "本次區間漲幅": f"{info['pct_change']:.2f}%",
-                            "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
-                        })
-                all_stocks.sort(key=lambda x: x["本次區間漲幅_val"], reverse=True)
-                for idx, item in enumerate(all_stocks):
-                    item["排行"] = idx + 1
-                if len(all_stocks) > 0:
-                    return all_stocks[:50]
-        except Exception as e_day:
-            print(f"Daily OpenAPI calculation failed: {e_day}")
-
-    # 💡 終極自癒保障 2：如果是周/月排行（或每日排行 OpenAPI 故障時），採用「多本土券商 Moneydj 系統輪替抓取」
-    hosts = [
-        "https://fubon-ebrokerdj.fbs.com.tw",
-        "https://newjust.masterlink.com.tw",
-        "https://jdata.yuanta.com.tw",
-        "http://kgieworld.moneydj.com"
-    ]
-    
-    session = create_yf_session()
-    all_stocks = []
-    
-    # 在多個券商主機之間進行自癒輪替
-    for host in hosts:
-        all_stocks = []
-        try:
-            res_listed = session.get(f"{host}/z/zg/zg_A_0_{d_param}.djhtm", timeout=6)
-            res_otc = None
-            for otc_idx in [1, 3]:
-                try:
-                    r_temp = session.get(f"{host}/z/zg/zg_A_{otc_idx}_{d_param}.djhtm", timeout=4)
-                    if r_temp.status_code == 200 and "漲幅" in r_temp.content.decode('big5', errors='ignore'):
-                        res_otc = r_temp
-                        break
-                except:
-                    continue
-            
-            for res in [res_listed, res_otc]:
-                if res and res.status_code == 200:
-                    html = res.content.decode('big5', errors='ignore')
-                    soup = BeautifulSoup(html, 'html.parser')
-                    for tr in soup.find_all('tr'):
-                        tr_str = str(tr)
-                        if "GenLink2stk" in tr_str:
-                            match = re.search(r"GenLink2stk\(\s*['\"](?:AS|OT)?(\w+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", tr_str)
-                            if match:
-                                code = match.group(1)
-                                name = match.group(2)
-                                tds = tr.find_all('td')
-                                if len(tds) >= 5:
-                                    close_price = tds[2].text.strip()
-                                    if d_param in [5, 20] and len(tds) >= 8:
-                                        change = tds[6].text.strip()
-                                        pct_change_str = tds[7].text.strip()
-                                    else:
-                                        change = tds[3].text.strip()
-                                        pct_change_str = tds[4].text.strip()
-                                        
-                                    pct_change_clean = pct_change_str.replace('+', '').replace('%', '').strip()
-                                    try:
-                                        pct_change_val = float(pct_change_clean)
-                                    except ValueError:
-                                        pct_change_val = 0.0
-                                        
-                                    all_stocks.append({
-                                        "代號": code,
-                                        "股票名稱": name,
-                                        "收盤價": close_price,
-                                        "本日漲跌": change,
-                                        "本次區間漲幅_val": pct_change_val,
-                                        "本次區間漲幅": f"{pct_change_clean}%" if "%" not in pct_change_str else pct_change_str,
-                                        "K線圖網址": f"https://tw.stock.yahoo.com/quote/{code}/technical-analysis"
-                                    })
-            if len(all_stocks) > 5:
-                break
-        except Exception as e:
-            print(f"Host {host} failed: {e}")
-            continue
-            
-    all_stocks.sort(key=lambda x: x["本次區間漲幅_val"], reverse=True)
-    for idx, item in enumerate(all_stocks):
-        item["排行"] = idx + 1
-        
-    return all_stocks[:50]
