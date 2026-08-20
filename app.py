@@ -144,49 +144,11 @@ def fetch_stock_top_brokers_local(code, days=5):
         
     return buyers[:10], sellers[:10]
 
-# ==================== 頁面基本設定 ====================
-st.set_page_config(layout="wide", page_title="台股三大法人飆股選股工具")
-
-# ==================== 網頁美化：隱藏頂部工具列與底部商標 ====================
-hide_streamlit_style = """
-            <style>
-            /* 隱藏頂部黑條、編輯按鈕與 GitHub 貓咪圖示 */
-            header {visibility: hidden;}
-            /* 隱藏 Streamlit 的主選單按鈕 */
-            #MainMenu {visibility: hidden;}
-            /* 隱藏網頁最下方的 Made with Streamlit 商標 */
-            footer {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-
-# 初始化 yfinance 快取 (在 Session State 中，避免網頁重新整理時重複下載)
-if "yf_cache" not in st.session_state:
-    st.session_state.yf_cache = {}
-if "yf_60m_cache" not in st.session_state:
-    st.session_state.yf_60m_cache = {}
-
-# 初始化篩選結果記憶體，避免勾選時表格消失
-if "tab1_results" not in st.session_state:
-    st.session_state.tab1_results = None
-
-# 🚀 記憶防刷：初始化自選股緩存機制
-if "watchlist_df_cache" not in st.session_state:
-    st.session_state.watchlist_df_cache = None
-if "watchlist_last_codes" not in st.session_state:
-    st.session_state.watchlist_last_codes = []
-
-# 初始化融資回溯所需的狀態變數，避免 Rerun 時狀態丟失
-if "margin_date_used" not in st.session_state:
-    st.session_state.margin_date_used = ""
-if "margin_is_fallback" not in st.session_state:
-    st.session_state.margin_is_fallback = False
-
 # ==================== 100% 執行緒安全防阻擋連線產生器 ====================
 def create_yf_session():
     """
     改用 100% 安全、不當機的標準純 Python requests Session。
-    配備 Chrome 偽裝標頭，防止 Yahoo 429 阻擋！
+    配備 Chrome 偽裝裝頭，防止 Yahoo 429 阻擋！
     """
     import requests as std_requests
     session = std_requests.Session()
@@ -199,7 +161,6 @@ def create_yf_session():
     return session
 
 # ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (多券商自癒 V7 完美對齊刷新版) ====================
-# 💡 升級：為徹底刷新 Streamlit 之前失敗記錄的 0.0 舊快取，此處將快取函數升級至第 7 版
 @st.cache_data(ttl=1800)
 def fetch_stock_rankings_cached_v7(period="day"):
     """
@@ -337,6 +298,80 @@ def save_comments(comments):
             json.dump(comments, f, ensure_ascii=False, indent=4)
     except Exception as e:
         st.error(f"儲存留言失敗: {e}")
+
+# ==================== 🚀 網頁專用精美 HTML 除息行事曆渲染器 (重要補回) ====================
+def render_streamlit_calendar(year, month, events):
+    """
+    利用純 HTML 渲染除息行事曆，支援瀏覽器原生 Tooltip 浮動提示
+    """
+    import calendar
+    cal = calendar.Calendar(calendar.SUNDAY)
+    month_days = cal.monthdayscalendar(year, month)
+    
+    # 星期標頭
+    headers = ["日", "一", "二", "三", "四", "五", "六"]
+    header_html = "".join([f"<th style='text-align: center; font-weight: bold; background: #f0f2f6; padding: 6px; border: 1px solid #e6e9ef;'>{h}</th>" for h in headers])
+    
+    rows_html = []
+    for week in month_days:
+        row_cells = []
+        for day in week:
+            if day == 0:
+                row_cells.append("<td style='border: 1px solid #e6e9ef; height: 45px;'></td>")
+            else:
+                target_date = datetime(year, month, day).date()
+                day_events = events.get(target_date, [])
+                
+                cell_style = "border: 1px solid #e6e9ef; height: 45px; text-align: center; vertical-align: middle; font-size: 14px;"
+                
+                if day_events:
+                    # 使用 HTML 實體 &#13; 實現 Tooltip 多行換行顯示
+                    tooltip_text = f"除息預告 ({year}/{month:02d}/{day:02d})：&#13;" + "&#13;".join([f"{ev['code']} {ev['name']}: {ev['amount']}" for ev in day_events])
+                    row_cells.append(
+                        f"<td style='{cell_style} background-color: #ffcccc; color: #cc0000; font-weight: bold; cursor: pointer;' "
+                        f"title='{tooltip_text}'>{day}</td>"
+                    )
+                else:
+                    now_tw = datetime.now(timezone(timedelta(hours=8))).date()
+                    if target_date == now_tw:
+                        row_cells.append(f"<td style='{cell_style} background-color: #007bff; color: white; font-weight: bold;'>{day}</td>")
+                    else:
+                        row_cells.append(f"<td style='{cell_style}'>{day}</td>")
+        rows_html.append(f"<tr>{''.join(row_cells)}</tr>")
+        
+    html_table = f"""
+    <table style='width: 100%; border-collapse: collapse; font-family: sans-serif;'>
+        <thead><tr>{header_html}</tr></thead>
+        <tbody>{''.join(rows_html)}</tbody>
+    </table>
+    """
+    return html_table
+
+# ==================== 雅虎財報 EPS 欄位模糊相容性解析器 ====================
+def get_eps_from_stmt(stmt):
+    """
+    自動適應雅虎財報在不同時期、不同個股所回傳的 EPS 欄位鍵名
+    """
+    if stmt is None or stmt.empty:
+        return None
+    for key in ['Basic EPS', 'Diluted EPS', 'BasicEarningsPerShare', 'DilutedEarningsPerShare', 'Basic', 'Diluted']:
+        if key in stmt.index:
+            return stmt.loc[key]
+    for idx in stmt.index:
+        if "EPS" in str(idx) or "Earnings Per Share" in str(idx):
+            return stmt.loc[idx]
+    return None
+
+def get_quarter_str(date_obj):
+    """
+    將財報日期轉換為季度標記字串，例如 2025Q3
+    """
+    try:
+        dt = pd.to_datetime(date_obj)
+        q = (dt.month - 1) // 3 + 1
+        return f"{dt.year}Q{q}"
+    except:
+        return ""
 
 # ==================== 側邊欄網站人氣統計與公告看板 ====================
 st.sidebar.markdown("<h3 style='text-align: center; font-weight: bold;'>網站數據統計</h3>", unsafe_allow_html=True)
@@ -657,7 +692,7 @@ with tab1:
                                 continue
                             
                             is_box, box_amp = helpers.calculate_box_consolidation(hist, days=5, exclude_last_day=True)
-                            if filter_box and not is_box:
+                            if filter_box Glen and not is_box:
                                 continue
                                 
                             if not is_code_etf:
@@ -666,7 +701,7 @@ with tab1:
                                     q_eps_series = get_eps_from_stmt(q_stmt)
                                     a_eps_series = get_eps_from_stmt(a_stmt)
                                     
-                                    # 🚀 語法修正：上一版本漏掉空格的 emptyand 已完美修正為正確的 empty and
+                                    # 🚀 修正語法空格錯誤
                                     if q_eps_series is not None and not q_eps_series.empty and a_eps_series is not None and not a_eps_series.empty:
                                         latest_q_eps = q_eps_series.iloc[0]
                                         q_date = q_eps_series.index[0]
@@ -1571,6 +1606,7 @@ with tab4:
                     st.session_state.cal_year += 1
                 st.rerun()
                 
+        # 🚀 重要修復：調用補回後的日曆渲染函數
         html_cal = render_streamlit_calendar(
             st.session_state.cal_year, 
             st.session_state.cal_month, 
@@ -1668,7 +1704,7 @@ with tab4:
                     "持股市值": f"{safe_int(market_val):,} 元"
                 })
         if pb_rows:
-            st.dataframe(pd.DataFrame(pb_rows), use_container_width=True)
+            st.dataframe(pb_rows, use_container_width=True)
             
             col_stat1, col_stat2, col_stat3 = st.columns(3)
             col_stat1.metric("總持股市值", f"{safe_int(total_market_value):,} 元")
