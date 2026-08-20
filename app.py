@@ -1040,14 +1040,14 @@ with tab1:
         else:
             st.warning("查無符合篩選條件之個股。")
 
-# ==================== 📈 【分頁二：台股強勢漲幅榜】(僅保留每日) ====================
+# ==================== 📈 【分頁二：台股強勢漲幅榜】 ====================
 with tab_rank:
     st.subheader("🔥 台股強勢漲幅排行榜 (Top 25 大飆股)")
     st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
     
     with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
-        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障與符號解析的第 5 版自癒排行 API
-        rank_data = fetch_stock_rankings_cached_v5(period="day")
+        # 🚀 升級：固定呼叫每日排行，對接具有雙重保障、正則相容的第 6 版自癒排行 API
+        rank_data = fetch_stock_rankings_cached_v6(period="day")
         
     if rank_data:
         df_rank = pd.DataFrame(rank_data)
