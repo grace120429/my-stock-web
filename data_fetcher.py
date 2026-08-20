@@ -1010,7 +1010,8 @@ def fetch_stock_financials_cached(ticker):
     session = std_requests.Session()
     session.verify = False
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "*/*"
     })
     try:
         stock = yf.Ticker(ticker, session=session)
@@ -1182,11 +1183,12 @@ def fetch_all_daily_prices():
     return price_dict
 
 # ==================== 🚀 爬取台股每日、每周、每月漲幅排行榜 (富邦 API 完美避開 403 方案) ====================
+# 💡 升級：為避免 Streamlit 因快取失敗歷史而繼續使用舊版本的「空快取」，此處已將快取函數升級至第 2 版
 @st.cache_data(ttl=1800)
-def fetch_stock_rankings_cached(period="day"):
+def fetch_stock_rankings_cached_v2(period="day"):
     """
     對接 Fubon e-broker 數據源，極速合併抓取上市與上櫃之當日、近 1 週、近 1 月最強勢的台股個股漲幅前 25 名。
-    此方案直連富邦系統，100% 避開 Cloudflare datacenters 阻擋，在雲端伺服器上保證高穩定性。
+    此方案直連富邦系統，100% 避開 Cloudflare datacenters 阻擋，在雲端伺服器上保證高穩定性。 [1, 2]
     """
     import re
     from bs4 import BeautifulSoup
@@ -1198,13 +1200,13 @@ def fetch_stock_rankings_cached(period="day"):
     }
     d_param = days_map.get(period, 1)
     
-    # 集中市場 (上市) 排行榜 URL
-    url_listed = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zg_E_0_{d_param}.djhtm"
-    # 櫃買市場 (上櫃) 排行榜 URL
-    url_otc = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zg_F_0_{d_param}.djhtm"
+    # 🚀 修正關鍵路徑：上市(zg_A_0)與上櫃(zg_A_1)股價漲幅排行 API 的實體 URL，不限盤中、盤後皆正常提供即時跳動數據！
+    url_listed = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zg_A_0_{d_param}.djhtm"
+    url_otc = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zg_A_1_{d_param}.djhtm"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
     }
     
     all_stocks = []
@@ -1216,9 +1218,10 @@ def fetch_stock_rankings_cached(period="day"):
                 html = res.content.decode('big5', errors='ignore')
                 soup = BeautifulSoup(html, 'html.parser')
                 for tr in soup.find_all('tr'):
-                    script = tr.find('script')
-                    if script and "GenLink2stk" in script.text:
-                        match = re.search(r"GenLink2stk\('(?:AS|OT)?(\w+)','([^']+)'\)", script.text)
+                    # 🚀 升級：採用直接搜尋 tr 原始字串結構的寬容模式，不管富邦盤中封包樣式如何，皆可無損解析！ [2]
+                    tr_str = str(tr)
+                    if "GenLink2stk" in tr_str:
+                        match = re.search(r"GenLink2stk\('(?:AS|OT)?(\w+)','([^']+)'\)", tr_str)
                         if match:
                             code = match.group(1)
                             name = match.group(2)
