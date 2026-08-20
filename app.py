@@ -365,9 +365,10 @@ st.info(f"{twd_str}")
 # 載入自訂主力券商與分點設定 (確保所有分頁與模組均能讀取)
 brokers_dict = storage.load_custom_brokers()
 
-# ==================== 建立五大分頁 ====================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+# ==================== 🚀 建立六大分頁 (台股強勢漲幅榜插入為分頁二) ====================
+tab1, tab_rank, tab2, tab3, tab4, tab5 = st.tabs([
     "三大法人選股大數據", 
+    "📈 台股強勢漲幅榜",  # 🚀 新增分頁二
     "我的自選監控", 
     "主力券商進出", 
     "台灣熱門 ETF 配息專區",
@@ -897,7 +898,7 @@ with tab1:
                                 else:
                                     st.caption("無賣超排行資料")
                         else:
-                            st.error("無法自交易所獲取全台主力排行，請稍候重試。")
+                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
                 
                 selected_codes = df_res.iloc[selected_rows]["代號"].tolist()
                 st.write("")
@@ -910,7 +911,6 @@ with tab1:
                             added_count += 1
                     if added_count > 0:
                         save_local_watchlist(current_watchlist)
-                        # 🚀 記憶防刷：自選名單變動時清除快取，強制下次重新載入最新資料
                         st.session_state.watchlist_df_cache = None
                         st.success(f"已成功加入 {added_count} 檔股票至您的專屬自選股！")
                         time.sleep(0.8)
@@ -920,7 +920,81 @@ with tab1:
         else:
             st.warning("查無符合篩選條件之個股。")
 
-# ==================== 【分頁二：我的自選監控】 ====================
+# ==================== 📈 【分頁二：台股強勢漲幅榜】(🚀 新增) ====================
+with tab_rank:
+    st.subheader("🔥 台股強勢漲幅排行榜 (Top 25 大飆股)")
+    st.caption("💡 說明：數據涵蓋全台灣上市與上櫃股票，每日收盤或盤中即時排行（快取更新間隔約 30 分鐘）。")
+    
+    # 建立多週期篩選選單
+    rank_period = st.radio(
+        "選擇漲幅統計週期：",
+        options=["每日（本日最強）", "每周（近 5 日最強）", "每月（近 20 日最強）"],
+        horizontal=True,
+        index=0
+    )
+    
+    # 對應爬取週期參數
+    period_key_map = {
+        "每日（本日最強）": "day",
+        "每周（近 5 日最強）": "week",
+        "每月（近 20 日最強）": "month"
+    }
+    selected_period_key = period_key_map[rank_period]
+    
+    with st.spinner("正在向系統調閱最新台股漲幅排行中..."):
+        rank_data = data_fetcher.fetch_stock_rankings_cached(period=selected_period_key)
+        
+    if rank_data:
+        df_rank = pd.DataFrame(rank_data)
+        
+        st.success(f"讀取完成！已成功加載 {rank_period} 前 {len(df_rank)} 檔最強勢飆股。")
+        st.caption("💡 提示：勾選左側框格，可在下方「一鍵加入我的自選股」進行批次關注！")
+        
+        # 隱藏 K 線圖網址的原始文字，改用 LinkColumn 漂亮渲染
+        display_rank_cols = [c for c in df_rank.columns if c != "K線圖網址"]
+        
+        rank_event = st.dataframe(
+            df_rank[display_rank_cols],
+            column_config={
+                "排行": st.column_config.NumberColumn("排行", format="%d"),
+                "代號": st.column_config.TextColumn("代號"),
+                "收盤價": st.column_config.TextColumn("現價 / 收盤價"),
+                "本日漲跌": st.column_config.TextColumn("本日漲跌"),
+                "本次區間漲幅": st.column_config.TextColumn("漲幅 %", help="本日/近5日/近20日之區間累計漲跌幅"),
+            },
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="multi-row",
+            key=f"df_rank_table_{selected_period_key}"
+        )
+        
+        # 處理一鍵加入自選股
+        selected_rank_rows = rank_event.selection.rows
+        if selected_rank_rows:
+            selected_rank_codes = df_rank.iloc[selected_rank_rows]["代號"].tolist()
+            st.write("")
+            col_rank_btn, _ = st.columns([1, 4])
+            with col_rank_btn:
+                if st.button(f"📥 一鍵加入我的自選股 ({len(selected_rank_codes)} 檔)", type="primary"):
+                    current_watchlist = get_local_watchlist()
+                    added_cnt = 0
+                    for code in selected_rank_codes:
+                        if code and code not in current_watchlist:
+                            current_watchlist.append(code)
+                            added_cnt += 1
+                    if added_cnt > 0:
+                        save_local_watchlist(current_watchlist)
+                        # 清除自選股工作階段快取，強迫下次開啟自選監控時自動更新
+                        st.session_state.watchlist_df_cache = None
+                        st.success(f"已成功將 {added_cnt} 檔強勢股加入您的自選監控名單！")
+                        time.sleep(0.8)
+                        st.rerun()
+                    else:
+                        st.info("您選取的股票都已經在您的自選名單中囉！")
+    else:
+        st.error("目前無法獲取排行數據，可能是因為證交所連線受阻，請稍後重試。")
+
+# ==================== 【分頁三：我的自選監控】 ====================
 with tab2:
     st.subheader("觀察名單即時監控")
     
@@ -947,7 +1021,6 @@ with tab2:
                         if new_watchlist_code not in watchlist:
                             watchlist.append(new_watchlist_code)
                             save_local_watchlist(watchlist)
-                            # 🚀 記憶防刷：自選名單變動時清除快取
                             st.session_state.watchlist_df_cache = None
                             st.success(f"已新增 {new_watchlist_code}！")
                             time.sleep(0.5)
@@ -977,7 +1050,6 @@ with tab2:
                         else:
                             updated_watchlist = [c for c in watchlist if c not in to_remove]
                             save_local_watchlist(updated_watchlist)
-                            # 🚀 記憶防刷：自選名單變動時清除快取
                             st.session_state.watchlist_df_cache = None
                             st.success(f"已成功從您的自選清單移除：{', '.join(to_remove)}！")
                             time.sleep(0.5)
@@ -994,7 +1066,6 @@ with tab2:
         if st.button("🔄 重新整理自選數據", use_container_width=True):
             st.session_state.yf_cache.clear()
             st.session_state.yf_60m_cache.clear()
-            # 🚀 記憶防刷：手動重整時徹底清除 Session 快取，強制重新向伺服器調閱新資料
             st.session_state.watchlist_df_cache = None
             st.success("快取已清除，正在重新抓取...")
             time.sleep(0.5)
@@ -1006,7 +1077,6 @@ with tab2:
             st.warning("目前監控清單為空。")
             
     if watchlist:
-        # 🚀 記憶防刷的核心邏輯：檢查股票代碼列表是否有改變、或緩存是否為空
         watchlist_changed = (watchlist != st.session_state.watchlist_last_codes)
         
         if st.session_state.watchlist_df_cache is None or watchlist_changed:
@@ -1015,7 +1085,6 @@ with tab2:
             yf_session_tab2 = create_yf_session()
             
             with st.spinner("正在分析自選股籌碼、財報與技術指標，請稍候..."):
-                # 🚀 升級：使用快取版籌碼抓取，避開 10 秒 API 延遲
                 chip_dfs, t86_dates = data_fetcher.get_recent_data_cached(days_count=5)
                 summary_chip = pd.DataFrame()
                 margin_data = {}
@@ -1061,7 +1130,6 @@ with tab2:
                     summary_chip['投信_張'] = summary_chip[col_trust] / 1000 if col_trust else 0
                     summary_chip['自營_張'] = summary_chip[col_dealer] / 1000 if col_dealer else 0
 
-                # 🚀 升級：使用快取版融資數據
                 if t86_dates:
                     sorted_dates = sorted(t86_dates, reverse=True)
                     for d_str in sorted_dates:
@@ -1102,7 +1170,6 @@ with tab2:
                         # 分析個股最新財報
                         if not is_code_etf_tab2:
                             try:
-                                # 🚀 升級：使用最新快取版個股財報財務數據，避免每次載入都在下載財報
                                 q_stmt, a_stmt = data_fetcher.fetch_stock_financials_cached(ticker)
                                 q_eps_series = get_eps_from_stmt(q_stmt)
                                 a_eps_series = get_eps_from_stmt(a_stmt)
@@ -1228,11 +1295,9 @@ with tab2:
                         errors_log_tab2.append(f"{code}: {str(ex_tab2)}")
                         continue                  
             
-            # 🚀 寫入快取記憶：避免下一次點選操作重覆跑運算
             st.session_state.watchlist_df_cache = w_rows
             st.session_state.watchlist_last_codes = list(watchlist)
         else:
-            # 🚀 快取生效：直接讀取 session 記憶體的結果，省去 15 秒分析流程！
             w_rows = st.session_state.watchlist_df_cache
             errors_log_tab2 = []
 
@@ -1275,7 +1340,6 @@ with tab2:
                         broker_details_list = []
                         if brokers_dict:
                             for b_name, b_id in brokers_dict.items():
-                                # 🚀 升級：使用快取版主力券商特定天數交易資料抓取，避免頻繁發送外部 HTTP 請求
                                 b_data = data_fetcher.fetch_broker_net_buys_cached(b_id, days_param_tab2)
                                 if code in b_data:
                                     net_buy_wan = b_data[code]["diff"]
@@ -1318,7 +1382,7 @@ with tab2:
                                 else:
                                     st.caption("無賣超排行資料")
                         else:
-                            st.error("無法自交易所獲取全台主力排行，請稍候重試。")
+                            st.error("無法自交易所獲取全台主力排行，可能因連線受限，請稍候重試。")
         else:
             st.warning("自選股數據分析失敗，請查看下方診斷報告。")
             
@@ -1326,7 +1390,7 @@ with tab2:
             with st.expander("⚠️ 查看自選背景診斷報告"):
                 st.write(errors_log_tab2)
 
-# ==================== 【分頁三：主力券商進出】 ====================
+# ==================== 【分頁四：主力券商進出】 ====================
 with tab3:
     st.subheader("特寫分點主力特定天數交易明細")
     
@@ -1376,7 +1440,6 @@ with tab3:
         b_id = brokers_dict.get(target_broker)
         
         with st.spinner("下載主力券商進出明細中..."):
-            # 🚀 升級：使用快取版主力統計抓取
             broker_results = data_fetcher.fetch_broker_net_buys_cached(b_id, days_param)
             if broker_results:
                 b_rows = []
@@ -1401,7 +1464,7 @@ with tab3:
             else:
                 st.error("無法自券商系統獲取資料，請稍後重試。")
 
-# ==================== 【分頁四：台灣熱門 ETF 配息與退休存錢筒】 ====================
+# ==================== 【分頁五：台灣熱門 ETF 配息與退休存錢筒】 ====================
 with tab4:
     now_tw = datetime.now(timezone(timedelta(hours=8)))
     if "cal_year" not in st.session_state:
@@ -1624,7 +1687,7 @@ with tab4:
         else:
             st.info("存錢筒目前無持股，請新增您的 ETF 持股比例。")
 
-# ==================== 【分頁五：讀者交流留言區】 ====================
+# ==================== 【分頁六：讀者交流留言區】 ====================
 with tab5:
     st.subheader("💬 讀者交流留言區")
     
