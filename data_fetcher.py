@@ -57,7 +57,7 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
                                         
                                         dates.append(datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, tzinfo=timezone(timedelta(hours=8))))
                                         opens.append(p_open)
-                                        highs.append(p_open)
+                                        highs.append(p_high)
                                         lows.append(p_low)
                                         closes.append(p_close)
                                         volumes.append(p_vol)
@@ -96,7 +96,7 @@ def fetch_historical_data_official_fallback(code, is_listed=True):
                                         
                                         dates.append(datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, tzinfo=timezone(timedelta(hours=8))))
                                         opens.append(p_open)
-                                        highs.append(p_open)
+                                        highs.append(p_high)
                                         lows.append(p_low)
                                         closes.append(p_close)
                                         volumes.append(p_vol)
@@ -576,8 +576,7 @@ def get_recent_data(days_count=3, progress_callback=None):
         attempts += 1
     return valid_dfs, valid_dates
 
-# ==================== 匯率抓取模組 (🚀 補上快取裝飾器，避免全域阻塞) ====================
-@st.cache_data(ttl=3600)  # 快取 1 小時，載入網頁時不需重覆連線
+# ==================== 匯率抓取模組 ====================
 def fetch_twd_data():
     twd_str = "💵 台幣匯率: 載入失敗"
     try:
@@ -596,6 +595,7 @@ def fetch_twd_data():
     except Exception:
         pass
     return twd_str
+
 # ==================== 集保大戶比例 CSV 串流解析 ====================
 def fetch_tdcc_data():
     url = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5"
@@ -1010,8 +1010,7 @@ def fetch_stock_financials_cached(ticker):
     session = std_requests.Session()
     session.verify = False
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "*/*"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36"
     })
     try:
         stock = yf.Ticker(ticker, session=session)
@@ -1111,36 +1110,21 @@ def fetch_stock_capitals():
             
     return capital_dict
 
-# ==================== 一鍵抓取全市場當日收盤行情快照 (極速防阻擋 V3 正確官方欄位與正負號解析修正版) ====================
+# ==================== 一鍵抓取全市場當日收盤行情快照 (極速防阻擋) ====================
 @st.cache_data(ttl=1800)  # 快取 30 分鐘，兼顧即時性與防刷限制
-def fetch_all_daily_prices_v3():
+def fetch_all_daily_prices():
     """
     一鍵抓取全市場「上市」與「上櫃」所有個股的當日收盤價、漲跌幅行情快照。
-    並具備高度容錯性，專門處理上市 Change 欄位中隨機夾帶的 凹 凸 ▲ ▼ 等特殊符號，完美提取正負數值！
+    上市對接證交所 STOCK_DAY_ALL
+    上櫃對接櫃買中心 tpex_mainboard_daily_close_quotes
+    只需 2 個 HTTP 請求即可獲取全台股 2000 檔個股現價，完全避免迴圈請求導致的 429 阻擋！
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     price_dict = {}
     
-    # 智慧型正負號符號提取器，100% 完美提取「▲」「▼」「+」「-」
-    def parse_change_val(change_str):
-        if not change_str or change_str == "None":
-            return 0.0
-        change_str = str(change_str).strip()
-        # 只保留數字、小數點和負號
-        num_part = "".join(c for c in change_str if c.isdigit() or c == '.')
-        try:
-            val = float(num_part)
-        except ValueError:
-            return 0.0
-        
-        # 判定漲跌方向
-        if "▼" in change_str or "-" in change_str or "凹" in change_str:
-            return -val
-        return val
-
-    # 1. 抓取上市個股當日行情 (TWSE OpenAPI)
+    # 1. 抓取上市個股當日行情
     url_twse = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     try:
         res = std_requests.get(url_twse, headers=headers, timeout=10, verify=False)
@@ -1149,29 +1133,21 @@ def fetch_all_daily_prices_v3():
             if isinstance(data, list):
                 for row in data:
                     code = str(row.get("Code", "")).strip()
-                    name = str(row.get("Name", "")).strip()
                     if code:
                         try:
-                            close_str = str(row.get("ClosingPrice", "0")).replace(',', '').strip()
-                            change_str = str(row.get("Change", "0")).replace(',', '').strip()
-                            
-                            p_close = float(close_str) if close_str and close_str != "None" else 0.0
-                            p_change = parse_change_val(change_str) # 🚀 關鍵升級：使用 parse_change_val 避開 float("▲1.50") 報錯 skip 的問題
-                            
-                            if p_close > 0:
-                                denom = p_close - p_change
-                                price_dict[code] = {
-                                    "name": name,
-                                    "price": p_close,
-                                    "change": p_change,
-                                    "pct_change": round((p_change / denom) * 100, 2) if denom > 0 else 0.0
-                                }
+                            p_close = float(row.get("Close", "0"))
+                            p_change = float(row.get("Change", "0"))
+                            price_dict[code] = {
+                                "price": p_close,
+                                "change": p_change,
+                                "pct_change": round((p_change / (p_close - p_change)) * 100, 2) if (p_close - p_change) > 0 else 0.0
+                            }
                         except:
                             continue
-    except Exception as e:
-        print(f"Error fetching TWSE Day All: {e}")
+    except Exception:
+        pass
         
-    # 2. 抓取上櫃個股當日行情 (TPEx OpenAPI)
+    # 2. 抓取上櫃個股當日行情
     url_tpex = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
     try:
         res = std_requests.get(url_tpex, headers=headers, timeout=10, verify=False)
@@ -1180,26 +1156,24 @@ def fetch_all_daily_prices_v3():
             if isinstance(data, list):
                 for row in data:
                     code = str(row.get("SecuritiesCompanyCode", "")).strip()
-                    name = str(row.get("CompanyName", row.get("Name", ""))).strip()
                     if code:
                         try:
+                            # 櫃買數據清洗多餘空白與逗號
                             close_str = str(row.get("Close", "0")).replace(',', '').strip()
                             change_str = str(row.get("PriceChange", "0")).replace(',', '').strip()
                             
                             p_close = float(close_str) if close_str and close_str != "None" else 0.0
-                            p_change = parse_change_val(change_str) # 🚀 關鍵升級：使用同套 parse_change_val 函數
+                            p_change = float(change_str) if change_str and change_str != "None" else 0.0
                             
                             if p_close > 0:
-                                denom = p_close - p_change
                                 price_dict[code] = {
-                                    "name": name,
                                     "price": p_close,
                                     "change": p_change,
-                                    "pct_change": round((p_change / denom) * 100, 2) if denom > 0 else 0.0
+                                    "pct_change": round((p_change / (p_close - p_change)) * 100, 2) if (p_close - p_change) > 0 else 0.0
                                 }
                         except:
                             continue
-    except Exception as e:
-        print(f"Error fetching TPEx Day All: {e}")
+    except Exception:
+        pass
         
     return price_dict
